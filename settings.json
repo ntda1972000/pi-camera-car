@@ -1,0 +1,28 @@
+{
+  "resolution": [
+    320,
+    240
+  ],
+  "fps": 15,
+  "stream_mode": "mjpeg",
+  "max_motor_speed": 9,
+  "camera_rotation": 0,
+  "io_devices": [
+    {
+      "name": "Light",
+      "state": true
+    },
+    {
+      "name": "Device 2",
+      "state": false
+    },
+    {
+      "name": "Device 3",
+      "state": false
+    },
+    {
+      "name": "Device 4",
+      "state": false
+    }
+  ]
+}

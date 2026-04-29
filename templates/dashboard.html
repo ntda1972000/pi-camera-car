@@ -1,0 +1,566 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+  <title>RC Car — Control Dashboard</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    html, body {
+      height: 100%;
+      overflow: hidden;
+      background: #212121;
+      color: #ececec;
+      font-family: ui-sans-serif, system-ui, -apple-system, sans-serif;
+    }
+
+    /* ──────────────────────────────────────────────────────────────────────
+       MOBILE HEIGHT TUNING
+       Adjust --bottom-offset to push content away from the nav bar.
+       Increase the px value if content is still cut off (e.g. 72px, 80px).
+    ────────────────────────────────────────────────────────────────────── */
+    :root { --bottom-offset: 0px; }
+    @media (max-width: 768px) { :root { --bottom-offset: 10px; } }
+
+    /* ── Full-viewport shell ── */
+    .shell {
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+      height: 100dvh;
+      max-height: calc(100dvh - var(--bottom-offset));
+      /* Use max() so safe-area never drops below 8px even on phones with no notch */
+      padding-top: 8px;
+      padding-right: max(8px, env(safe-area-inset-right));
+      padding-bottom: max(12px, env(safe-area-inset-bottom));
+      padding-left: max(8px, env(safe-area-inset-left));
+      gap: 6px;
+      overflow: hidden;
+    }
+
+    /* ── Top bar ── */
+    .top-bar {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-shrink: 0;
+      height: 44px;
+    }
+    h1 {
+      font-size: 1.1rem;
+      font-weight: 600;
+      color: #ececec;
+      letter-spacing: 0;
+    }
+    .settings-btn {
+      width: 40px;
+      height: 40px;
+      background: #10a37f;
+      border: none;
+      border-radius: 50%;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1.1rem;
+      text-decoration: none;
+      transition: background 0.2s, transform 0.3s;
+      flex-shrink: 0;
+    }
+    .settings-btn:hover { background: #0d8c6c; transform: rotate(90deg); }
+
+    /* ── Main area (fills remaining height) ── */
+    .main {
+      flex: 1;
+      min-height: 0;           /* allow shrink below content size */
+      display: grid;
+      gap: 8px;
+    }
+
+    /* PC: side-by-side */
+    @media (min-width: 769px) {
+      .main { grid-template-columns: 1fr 1fr; }
+    }
+
+    @media (max-width: 768px) {
+      .main { grid-template-columns: 1fr; grid-template-rows: 1fr 1fr; }
+      h1 { font-size: 0.9rem; }
+      .top-bar { height: 36px; }
+      .settings-btn { width: 34px; height: 34px; font-size: 1rem; }
+      .status-card { padding: 6px 10px; }
+      .card-title { font-size: 0.6rem; margin-bottom: 5px; }
+      .stat { padding: 3px 2px; }
+      .control-card { padding: 6px 10px; }
+    }
+
+    /* ── Stream panel ── */
+    .stream-panel {
+      background: #000;
+      border: 1px solid #3f3f3f;
+      border-radius: 10px;
+      overflow: hidden;
+      min-height: 0;
+    }
+    .stream-panel img,
+    .stream-panel video {
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+      display: block;
+    }
+    .stream-panel video { display: none; }
+
+    /* ── Right/bottom panel ── */
+    .side-panel {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      min-height: 0;
+    }
+
+    /* ── Status card (compact) ── */
+    .status-card {
+      background: #2f2f2f;
+      border: 1px solid #3f3f3f;
+      border-radius: 10px;
+      padding: 10px 14px;
+      flex-shrink: 0;
+    }
+    .card-title {
+      font-size: 0.7rem;
+      letter-spacing: 0.5px;
+      text-transform: uppercase;
+      color: #8e8ea0;
+      margin-bottom: 8px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .cam-dot {
+      width: 8px; height: 8px;
+      border-radius: 50%;
+      background: #565869;
+      flex-shrink: 0;
+      transition: background 0.3s;
+    }
+    .cam-dot.ok { background: #10a37f; }
+    .cam-dot.err { background: #ef4444; animation: blink 1s infinite; }
+    @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0.3} }
+    .status-row { display: flex; gap: 6px; }
+    .stat {
+      flex: 1;
+      min-width: 0;
+      container-type: inline-size;   /* enables cqi units inside this cell */
+      background: #212121;
+      border: 1px solid #3f3f3f;
+      border-radius: 6px;
+      padding: 6px 8px;
+      text-align: center;
+    }
+    .stat-label {
+      font-size: 10cqi;              /* scales with cell width */
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      color: #565869;
+    }
+    .stat-value {
+      font-size: 16cqi;              /* scales with cell width */
+      font-weight: 600;
+      color: #10a37f;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    /* ── Control card (fills rest of side panel) ── */
+    .control-card {
+      background: #2f2f2f;
+      border: 1px solid #3f3f3f;
+      border-radius: 10px;
+      padding: 10px 14px;
+      flex: 1;
+      min-height: 0;
+      display: flex;
+      flex-direction: column;
+    }
+    .control-card .card-title { margin-bottom: 8px; }
+
+    /* ── Joystick ── */
+    .joystick-wrapper {
+      flex: 1;
+      min-height: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+    }
+    .dir-display {
+      font-size: 0.75rem;
+      color: #8e8ea0;
+      letter-spacing: 0.5px;
+      height: 18px;
+      text-align: center;
+    }
+    .dir-display span { color: #10a37f; font-weight: 600; }
+    .joystick-track {
+      position: relative;
+      border-radius: 50%;
+      background: #212121;
+      border: 2px solid #3f3f3f;
+      touch-action: none;
+      user-select: none;
+      /* size set by JS */
+    }
+    .joystick-track::before {
+      content: '';
+      position: absolute;
+      inset: 0;
+      border-radius: 50%;
+      background: radial-gradient(circle at center, rgba(16,163,127,0.07) 0%, transparent 70%);
+      pointer-events: none;
+    }
+    /* crosshair lines */
+    .joystick-track::after {
+      content: '';
+      position: absolute;
+      inset: 0;
+      border-radius: 50%;
+      background:
+        linear-gradient(#3f3f3f 1px, transparent 1px),
+        linear-gradient(90deg, #3f3f3f 1px, transparent 1px);
+      background-size: 100% 50%, 50% 100%;
+      background-position: center center;
+      pointer-events: none;
+    }
+    .joystick-knob {
+      position: absolute;
+      width: 22%;
+      height: 22%;
+      border-radius: 50%;
+      background: radial-gradient(circle at 35% 35%, #1fc99a, #10a37f);
+      box-shadow: 0 4px 16px rgba(16,163,127,0.5);
+      transform: translate(-50%, -50%);
+      top: 50%; left: 50%;
+      pointer-events: none;
+      transition: box-shadow 0.1s;
+    }
+    .joystick-knob.active {
+      box-shadow: 0 4px 28px rgba(16,163,127,0.9);
+    }
+    .joy-footer {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      width: 100%;
+      padding: 0 4px;
+    }
+    .speed-badge {
+      font-size: 0.7rem;
+      color: #565869;
+    }
+    .speed-badge span { color: #10a37f; font-weight: 600; }
+    .current-speed { font-size: 0.7rem; color: #565869; }
+    .current-speed span { color: #ececec; font-weight: 700; font-size: 0.9rem; }
+  </style>
+</head>
+<body>
+  <div class="shell">
+
+    <!-- Top bar -->
+    <div class="top-bar">
+      <h1>🎮 RC Control Center</h1>
+      <a href="/settings" class="settings-btn" title="Settings">⚙️</a>
+    </div>
+
+    <!-- Main content -->
+    <div class="main">
+
+      <!-- Left / Top: live stream -->
+      <div class="stream-panel">
+        <img id="stream-img" src="/video_feed" alt="Live camera feed" />
+        <video id="stream-video" autoplay muted playsinline></video>
+      </div>
+
+      <!-- Right / Bottom: status + controls -->
+      <div class="side-panel">
+
+        <!-- Compact status strip -->
+        <div class="status-card">
+          <div class="card-title"><span class="cam-dot" id="cam-dot"></span> Stream Status</div>
+          <div class="status-row">
+            <div class="stat">
+              <div class="stat-label">Resolution</div>
+              <div class="stat-value" id="status-res">—</div>
+            </div>
+            <div class="stat">
+              <div class="stat-label">FPS</div>
+              <div class="stat-value" id="status-fps">—</div>
+            </div>
+            <div class="stat">
+              <div class="stat-label">Live kbps</div>
+              <div class="stat-value" id="status-kbps">—</div>
+            </div>
+            <div class="stat">
+              <div class="stat-label">Battery</div>
+              <div class="stat-value" id="status-batt">—</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Controls: joystick -->
+        <div class="control-card">
+          <div class="card-title">🎛️ Drive Controls</div>
+          <div class="joystick-wrapper">
+            <div class="dir-display" id="dir-display">IDLE</div>
+            <div class="joystick-track" id="joystick-track">
+              <div class="joystick-knob" id="joystick-knob"></div>
+            </div>
+            <div class="joy-footer">
+              <div class="speed-badge">Max: <span id="speed-label">—</span>/10</div>
+              <div class="current-speed">Speed: <span id="cur-speed">0%</span></div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+  </div>
+
+  <script>
+    const camDot = document.getElementById("cam-dot");
+    const streamImg = document.getElementById("stream-img");
+    const streamVideo = document.getElementById("stream-video");
+    let wasDown = false;
+    let usingWebRTC = false;
+    let webrtcPc = null;
+
+    // ── WebRTC ───────────────────────────────────────────────────────────────
+    async function startWebRTC() {
+      if (!window.RTCPeerConnection) return false;
+      try {
+        if (webrtcPc) { webrtcPc.close(); webrtcPc = null; }
+        webrtcPc = new RTCPeerConnection({
+          iceServers: [{ urls: "stun:stun.l.google.com:19302" }]
+        });
+        webrtcPc.ontrack = e => {
+          if (e.streams && e.streams[0]) streamVideo.srcObject = e.streams[0];
+        };
+        webrtcPc.addTransceiver("video", { direction: "recvonly" });
+        const offer = await webrtcPc.createOffer();
+        await webrtcPc.setLocalDescription(offer);
+        // Wait for ICE gathering (max 5s)
+        await new Promise(resolve => {
+          if (webrtcPc.iceGatheringState === "complete") { resolve(); return; }
+          const t = setTimeout(resolve, 5000);
+          webrtcPc.addEventListener("icegatheringstatechange", () => {
+            if (webrtcPc.iceGatheringState === "complete") { clearTimeout(t); resolve(); }
+          });
+        });
+        const resp = await fetch("/api/webrtc/offer", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ sdp: webrtcPc.localDescription.sdp, type: webrtcPc.localDescription.type })
+        });
+        if (!resp.ok) throw new Error("Server returned " + resp.status);
+        const answer = await resp.json();
+        await webrtcPc.setRemoteDescription(answer);
+        streamVideo.style.display = "block";
+        streamImg.style.display = "none";
+        usingWebRTC = true;
+        console.log("WebRTC stream active");
+        return true;
+      } catch (e) {
+        console.warn("WebRTC failed, using MJPEG:", e);
+        if (webrtcPc) { webrtcPc.close(); webrtcPc = null; }
+        usingWebRTC = false;
+        streamImg.style.display = "block";
+        streamVideo.style.display = "none";
+        return false;
+      }
+    }
+    // ─────────────────────────────────────────────────────────────────────────
+
+    // ── Live kbps from WebRTC getStats() (updated every 2s) ─────────────────
+    let _rtcPrevBytes = 0, _rtcPrevTime = 0;
+    async function pollWebRTCStats() {
+      if (!webrtcPc || !usingWebRTC) return;
+      try {
+        const stats = await webrtcPc.getStats();
+        stats.forEach(r => {
+          if (r.type === "outbound-rtp" || r.type === "inbound-rtp") return; // skip
+          if (r.type === "candidate-pair" && r.bytesSent !== undefined) {
+            const now = Date.now() / 1000;
+            if (_rtcPrevTime > 0) {
+              const dt = now - _rtcPrevTime;
+              const db = r.bytesSent - _rtcPrevBytes;
+              if (dt > 0 && db >= 0) {
+                const kbps = Math.round((db * 8) / (dt * 1000));
+                const el = document.getElementById("status-kbps");
+                if (el) el.textContent = kbps + " kbps";
+              }
+            }
+            _rtcPrevBytes = r.bytesSent;
+            _rtcPrevTime = now;
+          }
+        });
+      } catch (_) {}
+    }
+    setInterval(pollWebRTCStats, 2000);
+    // ─────────────────────────────────────────────────────────────────────────
+
+    function updateStatus() {
+      fetch("/api/status")
+        .then(r => r.json())
+        .then(data => {
+          document.getElementById("status-res").textContent =
+            data.resolution[0] + "×" + data.resolution[1];
+          document.getElementById("status-fps").textContent = data.fps + " fps";
+          // Show server-side actual bitrate; WebRTC getStats() will overwrite if active
+          const kbpsEl = document.getElementById("status-kbps");
+          if (!usingWebRTC && data.actual_bitrate_kbps !== undefined) {
+            kbpsEl.textContent = data.actual_bitrate_kbps + " kbps";
+          } else if (!usingWebRTC) {
+            kbpsEl.textContent = data.bitrate_kbps + " kbps*";
+          }
+          document.getElementById("speed-label").textContent =
+            data.max_motor_speed !== undefined ? data.max_motor_speed : "—";
+
+          const battEl = document.getElementById("status-batt");
+          const batt = data.battery_percent;
+          if (batt !== null && batt !== undefined) {
+            battEl.textContent = batt + "%";
+            battEl.style.color = batt < 20 ? "#f87171" : batt < 40 ? "#f59e0b" : "#10a37f";
+          } else {
+            battEl.textContent = "N/A";
+            battEl.style.color = "#565869";
+          }
+
+          if (data.camera_ok) {
+            camDot.className = "cam-dot ok";
+            if (wasDown) {
+              wasDown = false;
+              if (usingWebRTC) startWebRTC().catch(() => {});
+              else streamImg.src = "/video_feed?" + Date.now();
+            }
+          } else {
+            camDot.className = "cam-dot err";
+            wasDown = true;
+          }
+        })
+        .catch(() => { camDot.className = "cam-dot err"; });
+    }
+
+    updateStatus();
+    setInterval(updateStatus, 3000);
+
+    // ── Joystick ────────────────────────────────────────────────────────────
+    const track   = document.getElementById("joystick-track");
+    const knob    = document.getElementById("joystick-knob");
+    const dirEl   = document.getElementById("dir-display");
+    let dragging  = false;
+    let trackR    = 0;   // radius of track
+    let knobR     = 0;   // radius of knob
+    let maxDist   = 0;   // max knob travel
+    let sendTimer = null;
+    let lastX = 0, lastY = 0;
+
+    function sizeJoystick() {
+      const wrapper = track.parentElement;
+      const available = Math.min(wrapper.clientWidth, wrapper.clientHeight - 52);
+      const size = Math.max(100, Math.min(260, available));
+      track.style.width  = size + "px";
+      track.style.height = size + "px";
+      trackR  = size / 2;
+      knobR   = (size * 0.22) / 2;   // matches CSS 22%
+      maxDist = trackR - knobR;
+    }
+
+    function dirLabel(x, y) {
+      if (Math.abs(x) < 0.15 && Math.abs(y) < 0.15) return "IDLE";
+      const parts = [];
+      if (y >  0.15) parts.push('<span>FORWARD</span>');
+      if (y < -0.15) parts.push('<span>REVERSE</span>');
+      if (x < -0.15) parts.push('<span>LEFT</span>');
+      if (x >  0.15) parts.push('<span>RIGHT</span>');
+      return parts.join(" + ");
+    }
+
+    const curSpeedEl = document.getElementById("cur-speed");
+
+    function moveKnob(clientX, clientY) {
+      const rect = track.getBoundingClientRect();
+      let dx = clientX - (rect.left + trackR);
+      let dy = clientY - (rect.top  + trackR);
+      const dist = Math.hypot(dx, dy);
+      if (dist > maxDist) { dx = dx / dist * maxDist; dy = dy / dist * maxDist; }
+      knob.style.left = (trackR + dx) + "px";
+      knob.style.top  = (trackR + dy) + "px";
+      lastX =  dx / maxDist;
+      lastY = -dy / maxDist;
+      dirEl.innerHTML = dirLabel(lastX, lastY);
+      const magnitude = Math.min(1, Math.hypot(lastX, lastY));
+      const maxSpd = parseInt(document.getElementById("speed-label").textContent) || 10;
+      curSpeedEl.textContent = Math.round(magnitude * maxSpd * 10) + "%";
+    }
+
+    function resetKnob() {
+      knob.style.left = trackR + "px";
+      knob.style.top  = trackR + "px";
+      lastX = 0; lastY = 0;
+      dirEl.innerHTML = "IDLE";
+      curSpeedEl.textContent = "0%";
+      sendControl(0, 0);
+    }
+
+    function sendControl(x, y) {
+      fetch("/api/control", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ x, y })
+      }).catch(() => {});
+    }
+
+    // Throttle sends to every 50ms
+    function scheduleSend() {
+      if (sendTimer) return;
+      sendTimer = setTimeout(() => {
+        sendTimer = null;
+        if (dragging) sendControl(lastX, lastY);
+      }, 50);
+    }
+
+    track.addEventListener("pointerdown", e => {
+      dragging = true;
+      knob.classList.add("active");
+      track.setPointerCapture(e.pointerId);
+      sizeJoystick();
+      moveKnob(e.clientX, e.clientY);
+      scheduleSend();
+    });
+
+    track.addEventListener("pointermove", e => {
+      if (!dragging) return;
+      moveKnob(e.clientX, e.clientY);
+      scheduleSend();
+    });
+
+    track.addEventListener("pointerup",    () => { dragging = false; knob.classList.remove("active"); resetKnob(); });
+    track.addEventListener("pointercancel",() => { dragging = false; knob.classList.remove("active"); resetKnob(); });
+
+    window.addEventListener("resize", () => { sizeJoystick(); if (!dragging) resetKnob(); });
+    window.addEventListener("load",   async () => {
+      sizeJoystick();
+      resetKnob();
+      // Check server stream_mode before attempting WebRTC
+      try {
+        const s = await fetch("/api/status").then(r => r.json());
+        if (s.stream_mode === "webrtc") startWebRTC();
+      } catch (_) { /* use MJPEG fallback */ }
+    });
+    // ────────────────────────────────────────────────────────────────────────
+  </script>
+</body>
+</html>

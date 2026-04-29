@@ -1,0 +1,11 @@
+# Web framework & streaming
+flask>=3.0
+
+# Future REST API for motor control (4G/DCOM module)
+fastapi>=0.111
+uvicorn[standard]>=0.29
+python-multipart>=0.0.9
+
+# Camera (picamera2 is pre-installed on Raspberry Pi OS;
+# listed here for documentation purposes)
+# picamera2

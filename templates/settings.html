@@ -1,0 +1,399 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>RC Car — Settings</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: #212121;
+      color: #ececec;
+      font-family: ui-sans-serif, system-ui, -apple-system, sans-serif;
+      padding: 24px 16px;
+      min-height: 100vh;
+    }
+    .container { max-width: 560px; margin: 0 auto; }
+    .back-link {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      margin-bottom: 20px;
+      color: #8e8ea0;
+      text-decoration: none;
+      font-size: 0.875rem;
+      transition: color 0.2s;
+    }
+    .back-link:hover { color: #ececec; }
+    h1 { font-size: 1.25rem; font-weight: 600; margin-bottom: 24px; color: #ececec; }
+    .settings-box {
+      background: #2f2f2f;
+      border: 1px solid #3f3f3f;
+      border-radius: 12px;
+      padding: 24px;
+    }
+    .setting-group { margin-bottom: 20px; }
+    .setting-group:last-child { margin-bottom: 0; }
+    label {
+      display: block;
+      margin-bottom: 8px;
+      font-size: 0.875rem;
+      color: #8e8ea0;
+    }
+    select {
+      width: 100%;
+      padding: 10px 14px;
+      background: #212121;
+      border: 1px solid #3f3f3f;
+      color: #ececec;
+      border-radius: 6px;
+      font-size: 0.95rem;
+      cursor: pointer;
+      transition: border 0.2s;
+    }
+    select:focus { outline: none; border-color: #10a37f; }
+    select option { background: #2f2f2f; color: #ececec; }
+    /* Motor speed slider */
+    .slider-row {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    input[type="range"] {
+      flex: 1;
+      -webkit-appearance: none;
+      height: 4px;
+      background: #3f3f3f;
+      border-radius: 2px;
+      outline: none;
+    }
+    input[type="range"]::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      width: 18px; height: 18px;
+      border-radius: 50%;
+      background: #10a37f;
+      cursor: pointer;
+    }
+    .slider-value {
+      min-width: 28px;
+      text-align: right;
+      font-weight: 600;
+      color: #10a37f;
+      font-size: 1rem;
+    }
+    .info-box {
+      background: #212121;
+      border: 1px solid #3f3f3f;
+      border-radius: 8px;
+      padding: 14px 16px;
+      margin-top: 20px;
+      font-size: 0.875rem;
+    }
+    .info-row {
+      display: flex;
+      justify-content: space-between;
+      padding: 5px 0;
+      border-bottom: 1px solid #3f3f3f;
+    }
+    .info-row:last-child { border-bottom: none; }
+    .info-label { color: #8e8ea0; }
+    .info-value { color: #10a37f; font-weight: 600; }
+    button {
+      width: 100%;
+      padding: 11px;
+      background: #10a37f;
+      color: #fff;
+      border: none;
+      border-radius: 6px;
+      font-weight: 600;
+      font-size: 0.95rem;
+      cursor: pointer;
+      margin-top: 20px;
+      transition: background 0.2s;
+    }
+    button:hover { background: #0d8c6c; }
+    button:disabled { opacity: 0.5; cursor: not-allowed; }
+    .status {
+      margin-top: 12px;
+      padding: 11px 14px;
+      border-radius: 6px;
+      font-size: 0.875rem;
+      display: none;
+    }
+    .status.success {
+      background: rgba(16, 163, 127, 0.15);
+      border: 1px solid rgba(16, 163, 127, 0.4);
+      color: #10a37f;
+      display: block;
+    }
+    .status.error {
+      background: rgba(239, 68, 68, 0.15);
+      border: 1px solid rgba(239, 68, 68, 0.4);
+      color: #f87171;
+      display: block;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <a href="/dashboard" class="back-link">← Back to Dashboard</a>
+    <h1>⚙️ Settings</h1>
+
+    <!-- ── Camera & Stream settings ───────────────────────────────────────── -->
+    <div class="settings-box">
+      <div class="setting-group">
+        <label for="resolution">Resolution</label>
+        <select id="resolution">
+          {% for res in resolution_options %}
+            <option value="{{ res[0] }},{{ res[1] }}"
+                    {% if res == current_resolution %}selected{% endif %}>
+              {{ res[0] }}×{{ res[1] }}
+            </option>
+          {% endfor %}
+        </select>
+      </div>
+
+      <div class="setting-group">
+        <label for="fps">Frame Rate (FPS)</label>
+        <select id="fps">
+          {% for f in fps_options %}
+            <option value="{{ f }}"
+                    {% if f == current_fps %}selected{% endif %}>
+              {{ f }} fps
+            </option>
+          {% endfor %}
+        </select>
+      </div>
+
+      <div class="setting-group">
+        <label for="stream-mode">Stream Mode</label>
+        <select id="stream-mode">
+          {% for mode in stream_mode_options %}
+            <option value="{{ mode }}"
+                    {% if mode == current_stream_mode %}selected{% endif %}>
+              {% if mode == "webrtc" %}WebRTC (H.264 — tiết kiệm 4G){% else %}MJPEG{% endif %}
+            </option>
+          {% endfor %}
+        </select>
+      </div>
+
+      <div class="setting-group">
+        <label for="camera-rotation">Camera Rotation</label>
+        <select id="camera-rotation">
+          {% for deg in rotation_options %}
+            <option value="{{ deg }}"
+                    {% if deg == current_rotation %}selected{% endif %}>
+              {% if deg == 0 %}0° — Normal
+              {% elif deg == 90 %}90° Clockwise
+              {% elif deg == 180 %}180° Flipped
+              {% elif deg == 270 %}270° Counter-clockwise
+              {% endif %}
+            </option>
+          {% endfor %}
+        </select>
+      </div>
+
+      <div class="setting-group">
+        <label for="max-motor-speed">Max Motor Speed (0 – 10)</label>
+        <div class="slider-row">
+          <input type="range" id="max-motor-speed" min="0" max="10" step="1"
+                 value="{{ current_max_motor_speed }}"
+                 oninput="document.getElementById('speed-val').textContent = this.value" />
+          <span class="slider-value" id="speed-val">{{ current_max_motor_speed }}</span>
+        </div>
+      </div>
+
+      <div class="info-box">
+        <div class="info-row">
+          <span class="info-label">Bitrate</span>
+          <span class="info-value" id="bitrate">{{ bitrate_kbps }} kbps</span>
+        </div>
+        <div class="info-row">
+          <span class="info-label">Data usage / hour</span>
+          <span class="info-value" id="mb-per-hour">{{ mb_per_hour }} MB</span>
+        </div>
+        <div class="info-row">
+          <span class="info-label">Playtime on 2 GB/day</span>
+          <span class="info-value" id="playtime">
+            {% set hours = (2000 / mb_per_hour) %}~{{ "%.1f" | format(hours) }} hours
+          </span>
+        </div>
+      </div>
+
+      <button type="button" onclick="saveSettings()" id="save-btn">Save Settings</button>
+      <div class="status" id="status"></div>
+    </div>
+
+    <!-- ── Custom I/O Devices ─────────────────────────────────────────────── -->
+    <h2 style="font-size:1rem;font-weight:600;color:#ececec;margin:24px 0 12px;">🔌 Custom I/O Devices</h2>
+    <div class="settings-box">
+      <p style="font-size:0.8rem;color:#565869;margin-bottom:16px;">
+        Name each output and set its initial state (applied on startup).
+      </p>
+
+      {% for dev in io_devices %}
+      <div class="setting-group io-device-row" id="io-row-{{ loop.index0 }}">
+        <label>Device {{ loop.index }}</label>
+        <div style="display:flex;gap:10px;align-items:center;">
+          <input type="text" class="io-name-input" id="io-name-{{ loop.index0 }}"
+                 maxlength="32" placeholder="Device {{ loop.index }}"
+                 value="{{ dev.name }}" />
+          <label class="toggle-switch" title="Initial state">
+            <input type="checkbox" class="io-init-check" id="io-init-{{ loop.index0 }}"
+                   {% if dev.state %}checked{% endif %} />
+            <span class="toggle-track">
+              <span class="toggle-thumb"></span>
+            </span>
+          </label>
+          <span class="io-state-label" id="io-state-label-{{ loop.index0 }}">
+            {{ "ON" if dev.state else "OFF" }}
+          </span>
+        </div>
+      </div>
+      {% endfor %}
+
+      <button type="button" onclick="saveIODevices()" id="io-save-btn">Save I/O Config</button>
+      <div class="status" id="io-status"></div>
+    </div>
+
+  </div>
+
+  <style>
+    /* ── I/O device rows ──────────────────────────────────────────── */
+    .io-device-row { margin-bottom: 16px; }
+    .io-device-row:last-of-type { margin-bottom: 0; }
+    .io-name-input {
+      flex: 1;
+      padding: 8px 12px;
+      background: #212121;
+      border: 1px solid #3f3f3f;
+      color: #ececec;
+      border-radius: 6px;
+      font-size: 0.9rem;
+      transition: border 0.2s;
+    }
+    .io-name-input:focus { outline: none; border-color: #10a37f; }
+    /* Toggle switch */
+    .toggle-switch { position: relative; display: inline-flex; align-items: center; cursor: pointer; }
+    .toggle-switch input { opacity: 0; width: 0; height: 0; position: absolute; }
+    .toggle-track {
+      width: 40px; height: 22px;
+      background: #3f3f3f;
+      border-radius: 11px;
+      position: relative;
+      transition: background 0.2s;
+    }
+    .toggle-switch input:checked + .toggle-track { background: #10a37f; }
+    .toggle-thumb {
+      position: absolute;
+      top: 3px; left: 3px;
+      width: 16px; height: 16px;
+      border-radius: 50%;
+      background: #ececec;
+      transition: left 0.2s;
+    }
+    .toggle-switch input:checked + .toggle-track .toggle-thumb { left: 21px; }
+    .io-state-label {
+      font-size: 0.78rem;
+      font-weight: 600;
+      min-width: 28px;
+      color: #565869;
+      transition: color 0.2s;
+    }
+    .io-state-label.on { color: #10a37f; }
+  </style>
+
+  <script>
+    const resSelect   = document.getElementById("resolution");
+    const fpsSelect   = document.getElementById("fps");
+    const modeSelect  = document.getElementById("stream-mode");
+    const bitrateEl   = document.getElementById("bitrate");
+    const mbPerHourEl = document.getElementById("mb-per-hour");
+    const playtimeEl  = document.getElementById("playtime");
+    const statusEl    = document.getElementById("status");
+    const saveBtn     = document.getElementById("save-btn");
+
+    function updateEstimate() {
+      const [width, height] = resSelect.value.split(",").map(Number);
+      const fps = parseInt(fpsSelect.value);
+      fetch(`/api/estimate?width=${width}&height=${height}&fps=${fps}`)
+        .then(r => r.json())
+        .then(data => {
+          bitrateEl.textContent   = data.bitrate_kbps + " kbps";
+          mbPerHourEl.textContent = data.mb_per_hour + " MB";
+          playtimeEl.textContent  = "~" + (2000 / data.mb_per_hour).toFixed(1) + " hours";
+        });
+    }
+
+    function saveSettings() {
+      const [width, height] = resSelect.value.split(",").map(Number);
+      const fps      = parseInt(fpsSelect.value);
+      const mode     = modeSelect.value;
+      const speed    = parseInt(document.getElementById("max-motor-speed").value);
+      const rotation = parseInt(document.getElementById("camera-rotation").value);
+      saveBtn.disabled = true;
+      fetch("/api/update_settings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ resolution: [width, height], fps, stream_mode: mode,
+                               max_motor_speed: speed, camera_rotation: rotation })
+      })
+        .then(r => r.json())
+        .then(() => {
+          statusEl.textContent = "✓ Settings saved!";
+          statusEl.className = "status success";
+          setTimeout(() => { statusEl.className = "status"; }, 4000);
+        })
+        .catch(() => {
+          statusEl.textContent = "✗ Error saving settings.";
+          statusEl.className = "status error";
+        })
+        .finally(() => { saveBtn.disabled = false; });
+    }
+
+    // ── I/O devices ──────────────────────────────────────────────────────────
+    // Update label text + colour when a toggle changes
+    document.querySelectorAll(".io-init-check").forEach((chk, i) => {
+      const lbl = document.getElementById("io-state-label-" + i);
+      function syncLabel() {
+        lbl.textContent = chk.checked ? "ON" : "OFF";
+        lbl.className = "io-state-label" + (chk.checked ? " on" : "");
+      }
+      syncLabel();
+      chk.addEventListener("change", syncLabel);
+    });
+
+    function saveIODevices() {
+      const ioBtn = document.getElementById("io-save-btn");
+      const ioStatus = document.getElementById("io-status");
+      const devices = [];
+      for (let i = 0; i < 4; i++) {
+        const name  = document.getElementById("io-name-" + i).value.trim()
+                      || ("Device " + (i + 1));
+        const state = document.getElementById("io-init-" + i).checked;
+        devices.push({ name, state });
+      }
+      ioBtn.disabled = true;
+      fetch("/api/update_settings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ io_devices: devices })
+      })
+        .then(r => r.json())
+        .then(() => {
+          ioStatus.textContent = "✓ I/O config saved!";
+          ioStatus.className = "status success";
+          setTimeout(() => { ioStatus.className = "status"; }, 4000);
+        })
+        .catch(() => {
+          ioStatus.textContent = "✗ Error saving I/O config.";
+          ioStatus.className = "status error";
+        })
+        .finally(() => { ioBtn.disabled = false; });
+    }
+
+    resSelect.addEventListener("change", updateEstimate);
+    fpsSelect.addEventListener("change", updateEstimate);
+  </script>
+</body>
+</html>

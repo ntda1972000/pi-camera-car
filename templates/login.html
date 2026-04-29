@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>RC Car — Login</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: #212121;
+      color: #ececec;
+      font-family: ui-sans-serif, system-ui, -apple-system, sans-serif;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      padding: 20px;
+    }
+    .login-box {
+      background: #2f2f2f;
+      border: 1px solid #3f3f3f;
+      border-radius: 12px;
+      padding: 40px;
+      width: 100%;
+      max-width: 340px;
+    }
+    h1 {
+      text-align: center;
+      margin-bottom: 28px;
+      font-size: 1.15rem;
+      font-weight: 600;
+      color: #ececec;
+    }
+    .form-group { margin-bottom: 18px; }
+    label {
+      display: block;
+      margin-bottom: 7px;
+      font-size: 0.85rem;
+      color: #8e8ea0;
+    }
+    input[type="password"] {
+      width: 100%;
+      padding: 11px 14px;
+      border: 1px solid #3f3f3f;
+      background: #212121;
+      color: #ececec;
+      border-radius: 6px;
+      font-size: 0.95rem;
+      transition: border 0.2s;
+    }
+    input[type="password"]:focus {
+      outline: none;
+      border-color: #10a37f;
+    }
+    button {
+      width: 100%;
+      padding: 11px;
+      background: #10a37f;
+      color: #fff;
+      border: none;
+      border-radius: 6px;
+      font-weight: 600;
+      font-size: 0.95rem;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+    button:hover { background: #0d8c6c; }
+    .error {
+      background: rgba(239, 68, 68, 0.15);
+      border: 1px solid rgba(239, 68, 68, 0.4);
+      color: #f87171;
+      padding: 11px 14px;
+      border-radius: 6px;
+      margin-bottom: 18px;
+      font-size: 0.875rem;
+    }
+  </style>
+</head>
+<body>
+  <div class="login-box">
+    <h1>🔐 Settings Access</h1>
+    {% if error %}
+      <div class="error">{{ error }}</div>
+    {% endif %}
+    <form method="POST">
+      <div class="form-group">
+        <label for="password">Password</label>
+        <input type="password" id="password" name="password" required autofocus />
+      </div>
+      <button type="submit">Access Settings</button>
+    </form>
+  </div>
+</body>
+</html>
