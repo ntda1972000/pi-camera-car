@@ -70,6 +70,16 @@ python app.py
 
 Default password: `duyanhcar` — **change `ADMIN_PASSWORD_HASH` in `app.py` before deployment**.
 
+### Auto-start on boot (systemd)
+```bash
+sudo cp pi-camera-car.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable pi-camera-car
+sudo systemctl start pi-camera-car
+# Check status
+sudo systemctl status pi-camera-car
+```
+
 ### Optional: WebRTC (lower latency)
 ```bash
 pip install aiortc
@@ -82,14 +92,15 @@ Restart the app; WebRTC will be listed automatically in the stream-mode selector
 
 ```
 pi-camera-car/
-├── app.py              # Flask application — camera, streaming, API, motor stub
-├── requirements.txt    # Python dependencies
-├── settings.json       # Persisted runtime settings (auto-generated)
+├── app.py                   # Flask application — camera, streaming, API, motor stub
+├── pi-camera-car.service    # Systemd service for auto-start on boot
+├── requirements.txt         # Python dependencies
+├── settings.json            # Persisted runtime settings (auto-generated)
 └── templates/
-    ├── index.html      # Public stream viewer
-    ├── login.html      # Password prompt
-    ├── dashboard.html  # Joystick + I/O control
-    └── settings.html   # Settings editor
+    ├── index.html           # Public stream viewer
+    ├── login.html           # Password prompt
+    ├── dashboard.html       # Joystick + I/O control
+    └── settings.html        # Settings editor
 ```
 
 ---
@@ -106,7 +117,7 @@ pi-camera-car/
 - [ ] **Headlights control** — first I/O device (GPIO pin) wired to front LEDs
 - [ ] **Mobile-first UI** — improved touch joystick, swipe gestures, portrait layout
 - [ ] **OTA update endpoint** — pull latest code and restart service via API
-- [ ] **Systemd service file** — auto-start on boot (`/etc/systemd/system/pi-camera-car.service`)
+- [x] **Systemd service file** — auto-start on boot (`pi-camera-car.service`)
 - [ ] **Recording / snapshot** — save frames to disk or stream to remote storage
 - [ ] **Multi-camera support** — switch between CSI and USB webcams at runtime
 

@@ -291,6 +291,10 @@
           <div class="card-title"><span class="cam-dot" id="cam-dot"></span> Stream Status</div>
           <div class="status-row">
             <div class="stat">
+              <div class="stat-label">Mode</div>
+              <div class="stat-value" id="status-mode">—</div>
+            </div>
+            <div class="stat">
               <div class="stat-label">Resolution</div>
               <div class="stat-value" id="status-res">—</div>
             </div>
@@ -415,6 +419,12 @@
       fetch("/api/status")
         .then(r => r.json())
         .then(data => {
+          // Show mode reflecting what the browser is actually using
+          const modeEl = document.getElementById("status-mode");
+          if (modeEl) {
+            const mode = usingWebRTC ? "WebRTC" : (data.stream_mode || "mjpeg").toUpperCase();
+            modeEl.textContent = mode;
+          }
           document.getElementById("status-res").textContent =
             data.resolution[0] + "×" + data.resolution[1];
           document.getElementById("status-fps").textContent = data.fps + " fps";

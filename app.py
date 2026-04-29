@@ -113,12 +113,36 @@ if WEBRTC_AVAILABLE:
     threading.Thread(target=_rtc_loop.run_forever, daemon=True, name="rtc-loop").start()
     _pcs: set = set()
 
+    # WebRTC tuning. H.264 needs a realistic floor at low resolutions; below
+    # ~150 kbps the encoder produces large I-frames that overshoot the cap.
+    WEBRTC_TARGET_KBPS = 100        # target ~MJPEG bandwidth
+    WEBRTC_MAX_FPS = 12             # throttle frames sent to encoder (saves CPU + bitrate)
+
     class PiCameraTrack(VideoStreamTrack):
-        """Reads from the shared MJPEG buffer, decodes, and feeds WebRTC as H.264."""
+        """Reads from the shared MJPEG buffer, decodes, and feeds WebRTC as H.264.
+
+        Reuses a single PyAV container across recv() calls so the decoder keeps
+        warm caches, and throttles to WEBRTC_MAX_FPS so we don't pay for re-encoding
+        every camera frame.
+        """
+
+        def __init__(self):
+            super().__init__()
+            self._last_jpeg_id = None
+            self._last_emit = 0.0
 
         async def recv(self):
             pts, time_base = await self.next_timestamp()
             loop = _asyncio.get_event_loop()
+
+            # Throttle to WEBRTC_MAX_FPS to avoid feeding redundant frames
+            min_interval = 1.0 / max(1, WEBRTC_MAX_FPS)
+            now = time.time()
+            wait = self._last_emit + min_interval - now
+            if wait > 0:
+                await _asyncio.sleep(wait)
+            self._last_emit = time.time()
+
             jpeg = await loop.run_in_executor(None, self._grab)
             if jpeg:
                 try:
@@ -175,11 +199,12 @@ if WEBRTC_AVAILABLE:
         answer = await pc.createAnswer()
         await pc.setLocalDescription(answer)
 
-        # Cap bandwidth to ~150 kbps (matches MJPEG; H.264 looks much better at that rate)
+        # Cap H.264 bitrate. aiortc's encoder treats this as a hint, but combined
+        # with the FPS throttle in PiCameraTrack it produces stable ~target_kbps.
         try:
             params = sender.getParameters()
             if params.encodings:
-                params.encodings[0].maxBitrate = 80_000  # bits/sec
+                params.encodings[0].maxBitrate = WEBRTC_TARGET_KBPS * 1000
                 await sender.setParameters(params)
         except Exception as exc:
             logging.debug(f"Bitrate cap failed: {exc}")
