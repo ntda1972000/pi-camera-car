@@ -89,7 +89,7 @@ io_states = [bool(d["state"]) for d in settings["io_devices"]]
 RESOLUTION_OPTIONS = [(160, 120), (320, 240), (480, 360), (640, 480)]
 FPS_OPTIONS = [5, 10, 15, 20, 30]
 ROTATION_OPTIONS = [0, 90, 180, 270]
-STREAM_MODE_OPTIONS = ["mjpeg"]  # "webrtc" and "hls" appended at runtime when available
+STREAM_MODE_OPTIONS = ["mjpeg"]  # "hls" and "webrtc" appended at runtime when available
 MJPEG_QUALITY = 25
 
 # ---------------------------------------------------------------------------
@@ -117,7 +117,7 @@ if HLS_AVAILABLE:
     STREAM_MODE_OPTIONS.append("hls")
     logging.info("mediamtx binary found — HLS/RTSP mode enabled.")
 else:
-    logging.info("mediamtx not found — HLS/RTSP disabled.")
+    logging.info("mediamtx not found — HLS/RTSP disabled. Run: bash setup.sh")
 
 _mediamtx_proc = None
 _mediamtx_lock = threading.Lock()
@@ -218,7 +218,7 @@ except ImportError:
 
 if WEBRTC_AVAILABLE:
     if "webrtc" not in STREAM_MODE_OPTIONS:
-        STREAM_MODE_OPTIONS.insert(0, "webrtc")
+        STREAM_MODE_OPTIONS.append("webrtc")
     _rtc_loop = _asyncio.new_event_loop()
     threading.Thread(target=_rtc_loop.run_forever, daemon=True, name="rtc-loop").start()
     _pcs: set = set()
