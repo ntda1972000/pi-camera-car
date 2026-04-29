@@ -58,6 +58,8 @@
     .settings-link:hover { background: #0d8c6c; }
     footer { font-size: 0.75rem; color: #565869; }
   </style>
+  <!-- hls.js for Low-Latency HLS playback (loaded only when needed) -->
+  <script src="https://cdn.jsdelivr.net/npm/hls.js@1/dist/hls.min.js"></script>
 </head>
 <body>
   <h1>RC Car Live View</h1>
@@ -97,7 +99,26 @@
     const streamImg   = document.getElementById("stream-img");
     const streamVideo = document.getElementById("stream-video");
     let webrtcPc = null;
+    let hlsPlayer = null;
 
+    function startHLS(hlsUrl) {
+      streamImg.style.display = "none";
+      streamVideo.style.display = "block";
+      if (typeof Hls !== "undefined" && Hls.isSupported()) {
+        hlsPlayer = new Hls({ lowLatencyMode: true, backBufferLength: 2 });
+        hlsPlayer.loadSource(hlsUrl);
+        hlsPlayer.attachMedia(streamVideo);
+        hlsPlayer.on(Hls.Events.MANIFEST_PARSED, () => streamVideo.play().catch(() => {}));
+      } else if (streamVideo.canPlayType("application/vnd.apple.mpegurl")) {
+        // Safari native HLS
+        streamVideo.src = hlsUrl;
+        streamVideo.play().catch(() => {});
+      } else {
+        // Fallback to MJPEG
+        streamImg.style.display = "block";
+        streamVideo.style.display = "none";
+      }
+    }
     async function startWebRTC() {
       if (!window.RTCPeerConnection) return;
       try {
@@ -128,9 +149,10 @@
       }
     }
 
-    // Only start WebRTC if server has it configured
+    // Only start WebRTC/HLS if server has it configured
     fetch("/api/status").then(r => r.json()).then(s => {
       if (s.stream_mode === "webrtc") startWebRTC();
+      else if (s.stream_mode === "hls" && s.hls_url) startHLS(s.hls_url);
     }).catch(() => {});
 
     function pollBattery() {

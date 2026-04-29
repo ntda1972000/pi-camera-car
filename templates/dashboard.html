@@ -4,6 +4,8 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
   <title>RC Car — Control Dashboard</title>
+  <!-- hls.js for Low-Latency HLS -->
+  <script src="https://cdn.jsdelivr.net/npm/hls.js@1/dist/hls.min.js"></script>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -339,7 +341,31 @@
     const streamVideo = document.getElementById("stream-video");
     let wasDown = false;
     let usingWebRTC = false;
+    let usingHLS = false;
     let webrtcPc = null;
+    let hlsPlayer = null;
+
+    // ── HLS (mediamtx hardware H.264) ────────────────────────────────────
+    function startHLS(hlsUrl) {
+      streamImg.style.display = "none";
+      streamVideo.style.display = "block";
+      if (typeof Hls !== "undefined" && Hls.isSupported()) {
+        if (hlsPlayer) { hlsPlayer.destroy(); hlsPlayer = null; }
+        hlsPlayer = new Hls({ lowLatencyMode: true, backBufferLength: 2 });
+        hlsPlayer.loadSource(hlsUrl);
+        hlsPlayer.attachMedia(streamVideo);
+        hlsPlayer.on(Hls.Events.MANIFEST_PARSED, () => streamVideo.play().catch(() => {}));
+        usingHLS = true;
+      } else if (streamVideo.canPlayType("application/vnd.apple.mpegurl")) {
+        streamVideo.src = hlsUrl;
+        streamVideo.play().catch(() => {});
+        usingHLS = true;
+      } else {
+        streamImg.style.display = "block";
+        streamVideo.style.display = "none";
+      }
+    }
+    // ─────────────────────────────────────────────────────────────────────────
 
     // ── WebRTC ───────────────────────────────────────────────────────────────
     async function startWebRTC() {
@@ -424,7 +450,7 @@
           // Show mode reflecting what the browser is actually using
           const modeEl = document.getElementById("status-mode");
           if (modeEl) {
-            const mode = usingWebRTC ? "WebRTC" : (data.stream_mode || "mjpeg").toUpperCase();
+            const mode = usingWebRTC ? "WebRTC" : usingHLS ? "HLS" : (data.stream_mode || "mjpeg").toUpperCase();
             modeEl.textContent = mode;
           }
           document.getElementById("status-res").textContent =
@@ -455,6 +481,7 @@
             if (wasDown) {
               wasDown = false;
               if (usingWebRTC) startWebRTC().catch(() => {});
+              else if (usingHLS && data.hls_url) startHLS(data.hls_url);
               else streamImg.src = "/video_feed?" + Date.now();
             }
           } else {
@@ -464,6 +491,15 @@
         })
         .catch(() => { camDot.className = "cam-dot err"; });
     }
+
+    // Initial stream setup based on server mode
+    fetch("/api/status").then(r => r.json()).then(data => {
+      if (data.stream_mode === "webrtc") {
+        startWebRTC().then(ok => { usingWebRTC = ok; });
+      } else if (data.stream_mode === "hls" && data.hls_url) {
+        startHLS(data.hls_url);
+      }
+    }).catch(() => {});
 
     updateStatus();
     setInterval(updateStatus, 3000);
