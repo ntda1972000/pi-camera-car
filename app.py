@@ -147,10 +147,20 @@ if WEBRTC_AVAILABLE:
             if jpeg:
                 try:
                     import io as _io
+                    # Scale down to half resolution before H.264 encode.
+                    # This is the single most effective way to cut I-frame size:
+                    # a 320x240 independent JPEG decode produces a raw YUV frame
+                    # that x264 must encode fresh — scaling to 160x120 quarters
+                    # the pixel count and cuts the encoded size by ~4x.
                     container = _av.open(_io.BytesIO(bytes(jpeg)), format="mjpeg")
                     try:
                         for raw in container.decode(video=0):
-                            frame = raw.reformat(format="yuv420p")
+                            w, h = tuple(settings["resolution"])
+                            enc_w = max(160, w // 2)
+                            enc_h = max(120, h // 2)
+                            frame = raw.reformat(
+                                width=enc_w, height=enc_h, format="yuv420p"
+                            )
                             frame.pts = pts
                             frame.time_base = time_base
                             return frame
@@ -160,7 +170,7 @@ if WEBRTC_AVAILABLE:
                     logging.debug(f"WebRTC frame decode: {exc}")
             # Blank frame fallback
             w, h = tuple(settings["resolution"])
-            frame = _av.VideoFrame(width=w, height=h, format="yuv420p")
+            frame = _av.VideoFrame(width=w // 2, height=h // 2, format="yuv420p")
             frame.pts = pts
             frame.time_base = time_base
             return frame

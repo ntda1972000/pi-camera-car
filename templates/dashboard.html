@@ -388,25 +388,27 @@
     // ─────────────────────────────────────────────────────────────────────────
 
     // ── Live kbps from WebRTC getStats() (updated every 2s) ─────────────────
+    // The browser is a *receiver* (recvonly), so video bytes are in
+    // inbound-rtp.bytesReceived — NOT candidate-pair.bytesSent (that is only
+    // outgoing RTCP/STUN control packets, hence the bogus ~2 kbps reading).
     let _rtcPrevBytes = 0, _rtcPrevTime = 0;
     async function pollWebRTCStats() {
       if (!webrtcPc || !usingWebRTC) return;
       try {
         const stats = await webrtcPc.getStats();
         stats.forEach(r => {
-          if (r.type === "outbound-rtp" || r.type === "inbound-rtp") return; // skip
-          if (r.type === "candidate-pair" && r.bytesSent !== undefined) {
+          if (r.type === "inbound-rtp" && r.kind === "video") {
             const now = Date.now() / 1000;
             if (_rtcPrevTime > 0) {
               const dt = now - _rtcPrevTime;
-              const db = r.bytesSent - _rtcPrevBytes;
+              const db = r.bytesReceived - _rtcPrevBytes;
               if (dt > 0 && db >= 0) {
                 const kbps = Math.round((db * 8) / (dt * 1000));
                 const el = document.getElementById("status-kbps");
                 if (el) el.textContent = kbps + " kbps";
               }
             }
-            _rtcPrevBytes = r.bytesSent;
+            _rtcPrevBytes = r.bytesReceived;
             _rtcPrevTime = now;
           }
         });
