@@ -171,7 +171,7 @@ def start_mediamtx():
             return  # already running
         # Fully release the camera device — stop_recording() alone is not enough;
         # picam2.close() tears down the libcamera pipeline so rpicam-vid can open it.
-        if CAMERA_AVAILABLE:
+        if CAMERA_AVAILABLE and picam2 is not None:
             try:
                 picam2.stop_recording()
             except Exception:
@@ -416,16 +416,29 @@ class StreamingOutput(io.BufferedIOBase):
 # --- Camera setup ---
 output = StreamingOutput()
 
-# Try to initialise the camera; continue without it if not present.
+# Kill any leftover mediamtx/rpicam-vid from a previous session before we
+# try to open the camera.  Without this, restarting the app while stream_mode
+# is "hls" leaves the camera device busy and Picamera2() raises RuntimeError.
+_subprocess.run(["pkill", "-x", "mediamtx"], capture_output=True)
+_subprocess.run(["pkill", "-x", "rpicam-vid"], capture_output=True)
+time.sleep(0.4)  # give the kernel a moment to release the device
+
+# Try to initialise the camera; skip if mode is HLS (mediamtx owns the device)
+# or if no camera is present.
 _cameras = Picamera2.global_camera_info()
-if _cameras:
-    picam2 = Picamera2()
-    CAMERA_AVAILABLE = True
-else:
+if not _cameras:
     picam2 = None
     CAMERA_AVAILABLE = False
     logging.warning("No camera detected — running in no-camera mode. "
                     "Check the CSI ribbon cable and reboot.")
+elif settings.get("stream_mode") == "hls":
+    # HLS mode: mediamtx/rpicam-vid will open the camera; don't touch it here.
+    picam2 = None
+    CAMERA_AVAILABLE = True  # camera hardware exists, just not opened by us
+    logging.info("HLS mode at startup — skipping Picamera2 init (mediamtx will open camera).")
+else:
+    picam2 = Picamera2()
+    CAMERA_AVAILABLE = True
 
 def _make_transform(degrees):
     """Convert rotation degrees to a libcamera Transform (hflip/vflip/transpose combos)."""
@@ -455,25 +468,33 @@ def configure_camera():
 
     # MJPEG / WebRTC — picamera2 path
     stop_mediamtx()
-    time.sleep(0.3)  # let rpicam-vid release the device before picam2 opens it
+    time.sleep(0.5)  # let rpicam-vid fully release the device before picam2 opens it
 
     if not CAMERA_AVAILABLE:
         return
 
-    # Re-initialise picam2 if it was closed when switching to HLS
-    try:
-        picam2.stop_recording()
-    except Exception:
-        pass
-    try:
-        if not picam2._initialized:  # re-open after close()
-            picam2 = Picamera2()
-    except Exception:
+    # picam2 may be None (startup in HLS mode) or closed (switched from HLS).
+    # In either case, create a fresh Picamera2 instance.
+    if picam2 is None:
         try:
             picam2 = Picamera2()
         except Exception as e:
-            logging.error(f"Failed to re-init camera: {e}")
+            logging.error(f"Failed to init camera: {e}")
             return
+    else:
+        try:
+            picam2.stop_recording()
+        except Exception:
+            pass
+        try:
+            if not picam2._initialized:
+                picam2 = Picamera2()
+        except Exception:
+            try:
+                picam2 = Picamera2()
+            except Exception as e:
+                logging.error(f"Failed to re-init camera: {e}")
+                return
 
     transform = _make_transform(settings.get("camera_rotation", 0))
 

@@ -60,7 +60,10 @@ A Raspberry Pi-powered RC car with live camera streaming and a browser-based con
 git clone https://github.com/ntda1972000/pi-camera-car.git
 cd pi-camera-car
 
-# Install dependencies (Raspberry Pi OS)
+# Download mediamtx binary (needed for HLS/RTSP mode)
+bash setup.sh
+
+# Install Python dependencies (Raspberry Pi OS)
 pip install -r requirements.txt
 
 # Run
@@ -93,6 +96,8 @@ Restart the app; WebRTC will be listed automatically in the stream-mode selector
 ```
 pi-camera-car/
 ├── app.py                   # Flask application — camera, streaming, API, motor stub
+├── setup.sh                 # Downloads mediamtx binary for HLS/RTSP mode
+├── mediamtx.yml             # Auto-generated mediamtx config (do not hand-edit)
 ├── pi-camera-car.service    # Systemd service for auto-start on boot
 ├── requirements.txt         # Python dependencies
 ├── settings.json            # Persisted runtime settings (auto-generated)
@@ -118,6 +123,7 @@ pi-camera-car/
 - [ ] **Mobile-first UI** — improved touch joystick, swipe gestures, portrait layout
 - [ ] **OTA update endpoint** — pull latest code and restart service via API
 - [x] **Systemd service file** — auto-start on boot (`pi-camera-car.service`)
+- [x] **HLS/RTSP streaming** — hardware H.264 via mediamtx (`rpicam-vid` → RTSP → HLS)
 - [ ] **Recording / snapshot** — save frames to disk or stream to remote storage
 - [ ] **Multi-camera support** — switch between CSI and USB webcams at runtime
 
