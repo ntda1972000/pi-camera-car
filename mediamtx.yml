@@ -16,8 +16,10 @@ paths:
     rpiCameraWidth: 320
     rpiCameraHeight: 240
     rpiCameraFPS: 15
-    rpiCameraIDR: 30
+    rpiCameraIDRPeriod: 30
     rpiCameraBitrate: 300000
-    rpiCameraH264Profile: baseline
-    rpiCameraH264Level: "3.1"
-    rpiCameraRotation: 0
+    rpiCameraCodec: hardwareH264
+    rpiCameraHardwareH264Profile: baseline
+    rpiCameraHardwareH264Level: "4.1"
+    rpiCameraHFlip: false
+    rpiCameraVFlip: false
