@@ -163,17 +163,24 @@ paths:
 
 
 def start_mediamtx():
-    """Start mediamtx process. Stops picamera2 first (both need the camera)."""
+    """Start mediamtx process. Fully closes picamera2 first so rpicam-vid
+    can own the libcamera device without resource conflicts."""
     global _mediamtx_proc
     with _mediamtx_lock:
         if _mediamtx_proc and _mediamtx_proc.poll() is None:
             return  # already running
-        # Stop MJPEG camera so rpicam-vid inside mediamtx can open it
+        # Fully release the camera device — stop_recording() alone is not enough;
+        # picam2.close() tears down the libcamera pipeline so rpicam-vid can open it.
         if CAMERA_AVAILABLE:
             try:
                 picam2.stop_recording()
             except Exception:
                 pass
+            try:
+                picam2.close()
+            except Exception:
+                pass
+            time.sleep(0.5)  # give the kernel camera driver time to release
         _write_mediamtx_conf()
         try:
             _mediamtx_proc = _subprocess.Popen(
@@ -434,10 +441,11 @@ def _make_transform(degrees):
 def configure_camera():
     """Apply current settings to the camera.
 
-    HLS mode: stop picamera2 and (re)start mediamtx so rpicam-vid can own
-    the sensor directly — hardware H.264 encode at full GOP efficiency.
-    MJPEG/WebRTC mode: stop mediamtx and run picamera2 as before.
+    HLS mode: fully close picamera2 and (re)start mediamtx so rpicam-vid
+    owns the sensor directly — hardware H.264 encode at full GOP efficiency.
+    MJPEG/WebRTC mode: stop mediamtx, re-initialise picamera2 if needed.
     """
+    global picam2
     mode = settings.get("stream_mode", "mjpeg")
 
     if mode == "hls":
@@ -447,13 +455,25 @@ def configure_camera():
 
     # MJPEG / WebRTC — picamera2 path
     stop_mediamtx()
+    time.sleep(0.3)  # let rpicam-vid release the device before picam2 opens it
 
     if not CAMERA_AVAILABLE:
         return
+
+    # Re-initialise picam2 if it was closed when switching to HLS
     try:
         picam2.stop_recording()
     except Exception:
         pass
+    try:
+        if not picam2._initialized:  # re-open after close()
+            picam2 = Picamera2()
+    except Exception:
+        try:
+            picam2 = Picamera2()
+        except Exception as e:
+            logging.error(f"Failed to re-init camera: {e}")
+            return
 
     transform = _make_transform(settings.get("camera_rotation", 0))
 
