@@ -4,6 +4,8 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
   <title>RC Car — Control Dashboard</title>
+  <!-- hls.js for Low-Latency HLS -->
+  <script src="https://cdn.jsdelivr.net/npm/hls.js@1/dist/hls.min.js"></script>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -291,6 +293,10 @@
           <div class="card-title"><span class="cam-dot" id="cam-dot"></span> Stream Status</div>
           <div class="status-row">
             <div class="stat">
+              <div class="stat-label">Mode</div>
+              <div class="stat-value" id="status-mode">—</div>
+            </div>
+            <div class="stat">
               <div class="stat-label">Resolution</div>
               <div class="stat-value" id="status-res">—</div>
             </div>
@@ -335,7 +341,31 @@
     const streamVideo = document.getElementById("stream-video");
     let wasDown = false;
     let usingWebRTC = false;
+    let usingHLS = false;
     let webrtcPc = null;
+    let hlsPlayer = null;
+
+    // ── HLS (mediamtx hardware H.264) ────────────────────────────────────
+    function startHLS(hlsUrl) {
+      streamImg.style.display = "none";
+      streamVideo.style.display = "block";
+      if (typeof Hls !== "undefined" && Hls.isSupported()) {
+        if (hlsPlayer) { hlsPlayer.destroy(); hlsPlayer = null; }
+        hlsPlayer = new Hls({ lowLatencyMode: true, backBufferLength: 2 });
+        hlsPlayer.loadSource(hlsUrl);
+        hlsPlayer.attachMedia(streamVideo);
+        hlsPlayer.on(Hls.Events.MANIFEST_PARSED, () => streamVideo.play().catch(() => {}));
+        usingHLS = true;
+      } else if (streamVideo.canPlayType("application/vnd.apple.mpegurl")) {
+        streamVideo.src = hlsUrl;
+        streamVideo.play().catch(() => {});
+        usingHLS = true;
+      } else {
+        streamImg.style.display = "block";
+        streamVideo.style.display = "none";
+      }
+    }
+    // ─────────────────────────────────────────────────────────────────────────
 
     // ── WebRTC ───────────────────────────────────────────────────────────────
     async function startWebRTC() {
@@ -384,25 +414,27 @@
     // ─────────────────────────────────────────────────────────────────────────
 
     // ── Live kbps from WebRTC getStats() (updated every 2s) ─────────────────
+    // The browser is a *receiver* (recvonly), so video bytes are in
+    // inbound-rtp.bytesReceived — NOT candidate-pair.bytesSent (that is only
+    // outgoing RTCP/STUN control packets, hence the bogus ~2 kbps reading).
     let _rtcPrevBytes = 0, _rtcPrevTime = 0;
     async function pollWebRTCStats() {
       if (!webrtcPc || !usingWebRTC) return;
       try {
         const stats = await webrtcPc.getStats();
         stats.forEach(r => {
-          if (r.type === "outbound-rtp" || r.type === "inbound-rtp") return; // skip
-          if (r.type === "candidate-pair" && r.bytesSent !== undefined) {
+          if (r.type === "inbound-rtp" && r.kind === "video") {
             const now = Date.now() / 1000;
             if (_rtcPrevTime > 0) {
               const dt = now - _rtcPrevTime;
-              const db = r.bytesSent - _rtcPrevBytes;
+              const db = r.bytesReceived - _rtcPrevBytes;
               if (dt > 0 && db >= 0) {
                 const kbps = Math.round((db * 8) / (dt * 1000));
                 const el = document.getElementById("status-kbps");
                 if (el) el.textContent = kbps + " kbps";
               }
             }
-            _rtcPrevBytes = r.bytesSent;
+            _rtcPrevBytes = r.bytesReceived;
             _rtcPrevTime = now;
           }
         });
@@ -415,6 +447,12 @@
       fetch("/api/status")
         .then(r => r.json())
         .then(data => {
+          // Show mode reflecting what the browser is actually using
+          const modeEl = document.getElementById("status-mode");
+          if (modeEl) {
+            const mode = usingWebRTC ? "WebRTC" : usingHLS ? "HLS" : (data.stream_mode || "mjpeg").toUpperCase();
+            modeEl.textContent = mode;
+          }
           document.getElementById("status-res").textContent =
             data.resolution[0] + "×" + data.resolution[1];
           document.getElementById("status-fps").textContent = data.fps + " fps";
@@ -443,6 +481,7 @@
             if (wasDown) {
               wasDown = false;
               if (usingWebRTC) startWebRTC().catch(() => {});
+              else if (usingHLS && data.hls_url) startHLS(data.hls_url);
               else streamImg.src = "/video_feed?" + Date.now();
             }
           } else {
@@ -452,6 +491,15 @@
         })
         .catch(() => { camDot.className = "cam-dot err"; });
     }
+
+    // Initial stream setup based on server mode
+    fetch("/api/status").then(r => r.json()).then(data => {
+      if (data.stream_mode === "webrtc") {
+        startWebRTC().then(ok => { usingWebRTC = ok; });
+      } else if (data.stream_mode === "hls" && data.hls_url) {
+        startHLS(data.hls_url);
+      }
+    }).catch(() => {});
 
     updateStatus();
     setInterval(updateStatus, 3000);

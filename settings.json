@@ -4,7 +4,7 @@
     240
   ],
   "fps": 15,
-  "stream_mode": "mjpeg",
+  "stream_mode": "hls",
   "max_motor_speed": 9,
   "camera_rotation": 0,
   "io_devices": [

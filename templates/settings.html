@@ -171,7 +171,9 @@
           {% for mode in stream_mode_options %}
             <option value="{{ mode }}"
                     {% if mode == current_stream_mode %}selected{% endif %}>
-              {% if mode == "webrtc" %}WebRTC (H.264 — tiết kiệm 4G){% else %}MJPEG{% endif %}
+              {% if mode == "webrtc" %}WebRTC (H.264 · software)
+              {% elif mode == "hls" %}HLS (H.264 · hardware · tiết kiệm nhất)
+              {% else %}MJPEG{% endif %}
             </option>
           {% endfor %}
         </select>
