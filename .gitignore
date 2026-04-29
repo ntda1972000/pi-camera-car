@@ -18,6 +18,9 @@ env/
 .env
 *.secret
 
+# mediamtx binary (large — download via setup.sh instead)
+mediamtx
+
 # Test / scratch files
 test.jpg
 test_*.jpg
