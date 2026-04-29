@@ -1,0 +1,16 @@
+[Unit]
+Description=Pi Camera Car — Flask web app
+After=network.target
+
+[Service]
+Type=simple
+User=pi
+WorkingDirectory=/home/pi/rc-car
+ExecStart=/usr/bin/python3 /home/pi/rc-car/app.py
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
