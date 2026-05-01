@@ -183,6 +183,7 @@
       min-height: 0;
       display: flex;
       flex-direction: column;
+      overflow-y: auto;
     }
     .control-card .card-title { margin-bottom: 8px; }
 
@@ -263,6 +264,47 @@
     .speed-badge span { color: #10a37f; font-weight: 600; }
     .current-speed { font-size: 0.7rem; color: #565869; }
     .current-speed span { color: #ececec; font-weight: 700; font-size: 0.9rem; }
+
+    /* ── I/O panel (below joystick — scroll down on small screens) ── */
+    .io-panel {
+      flex-shrink: 0;
+      margin-top: 10px;
+      padding-top: 10px;
+      border-top: 1px solid #3f3f3f;
+    }
+    .io-panel-title {
+      font-size: 0.7rem;
+      letter-spacing: 0.5px;
+      text-transform: uppercase;
+      color: #8e8ea0;
+      margin-bottom: 8px;
+    }
+    .io-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 6px;
+    }
+    .io-btn {
+      padding: 10px 8px;
+      background: #212121;
+      border: 1px solid #3f3f3f;
+      border-radius: 6px;
+      color: #8e8ea0;
+      font-size: 0.8rem;
+      font-weight: 500;
+      cursor: pointer;
+      text-align: center;
+      transition: background 0.15s, color 0.15s, border-color 0.15s;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .io-btn.on {
+      background: rgba(16, 163, 127, 0.15);
+      border-color: #10a37f;
+      color: #10a37f;
+    }
+    .io-btn:active { opacity: 0.7; }
   </style>
 </head>
 <body>
@@ -307,11 +349,25 @@
               <div class="stat-value" id="status-batt">—</div>
             </div>
           </div>
+          <div class="status-row" style="margin-top:4px;">
+            <div class="stat">
+              <div class="stat-label">Mode</div>
+              <div class="stat-value" id="status-mode">—</div>
+            </div>
+            <div class="stat">
+              <div class="stat-label">↑ TX</div>
+              <div class="stat-value" id="status-tx">—</div>
+            </div>
+            <div class="stat">
+              <div class="stat-label">↓ RX</div>
+              <div class="stat-value" id="status-rx">—</div>
+            </div>
+          </div>
         </div>
 
-        <!-- Controls: joystick -->
+        <!-- Controls: joystick + I/O -->
         <div class="control-card">
-          <div class="card-title">🎛️ Drive Controls</div>
+          <div class="card-title">🏛️ Drive Controls</div>
           <div class="joystick-wrapper">
             <div class="dir-display" id="dir-display">IDLE</div>
             <div class="joystick-track" id="joystick-track">
@@ -320,6 +376,13 @@
             <div class="joy-footer">
               <div class="speed-badge">Max: <span id="speed-label">—</span>/10</div>
               <div class="current-speed">Speed: <span id="cur-speed">0%</span></div>
+            </div>
+          </div>
+          <!-- I/O controls — scroll down on mobile if needed -->
+          <div class="io-panel">
+            <div class="io-panel-title">🔌 I/O Controls</div>
+            <div class="io-grid" id="io-grid">
+              <!-- populated by JS on first api/status poll -->
             </div>
           </div>
         </div>
@@ -411,6 +474,49 @@
     setInterval(pollWebRTCStats, 2000);
     // ─────────────────────────────────────────────────────────────────────────
 
+    // ── I/O controls ────────────────────────────────────────────────────────────────
+    let _ioRendered = false;
+    function renderIOButtons(devices) {
+      const grid = document.getElementById("io-grid");
+      if (!grid) return;
+      grid.innerHTML = "";
+      devices.forEach((dev, i) => {
+        const btn = document.createElement("button");
+        btn.className = "io-btn" + (dev.state ? " on" : "");
+        btn.id = "io-btn-" + i;
+        btn.textContent = dev.name;
+        btn.onclick = () => toggleIO(i);
+        grid.appendChild(btn);
+      });
+      _ioRendered = true;
+    }
+    function updateIOButtons(devices) {
+      if (!_ioRendered) { renderIOButtons(devices); return; }
+      devices.forEach((dev, i) => {
+        const btn = document.getElementById("io-btn-" + i);
+        if (btn) {
+          btn.className = "io-btn" + (dev.state ? " on" : "");
+          btn.textContent = dev.name;
+        }
+      });
+    }
+    function toggleIO(idx) {
+      fetch("/api/io_toggle", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ index: idx })
+      })
+        .then(r => r.json())
+        .then(d => {
+          if (d.status === "ok") {
+            const btn = document.getElementById("io-btn-" + d.index);
+            if (btn) btn.className = "io-btn" + (d.state ? " on" : "");
+          }
+        })
+        .catch(() => {});
+    }
+    // ─────────────────────────────────────────────────────────────────────────
+
     function updateStatus() {
       fetch("/api/status")
         .then(r => r.json())
@@ -437,6 +543,17 @@
             battEl.textContent = "N/A";
             battEl.style.color = "#565869";
           }
+
+          // Stream mode
+          const modeEl = document.getElementById("status-mode");
+          if (modeEl) modeEl.textContent = data.stream_mode === "webrtc" ? "WebRTC" : "MJPEG";
+          // Network TX / RX from Pi NIC counters
+          const txEl = document.getElementById("status-tx");
+          const rxEl = document.getElementById("status-rx");
+          if (txEl) txEl.textContent = data.net_tx_kbps !== undefined ? data.net_tx_kbps + "k" : "N/A";
+          if (rxEl) rxEl.textContent = data.net_rx_kbps !== undefined ? data.net_rx_kbps + "k" : "N/A";
+          // I/O buttons
+          if (data.io_devices) updateIOButtons(data.io_devices);
 
           if (data.camera_ok) {
             camDot.className = "cam-dot ok";

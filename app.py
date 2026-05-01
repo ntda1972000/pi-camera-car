@@ -32,7 +32,6 @@ DEFAULT_SETTINGS = {
     "stream_mode": "mjpeg",
     "max_motor_speed": 7,     # 0–10 scale
     "camera_rotation": 0,     # degrees: 0, 90, 180, 270
-    "h264_bitrate_kbps": 500, # hardware H.264 target bitrate (WebRTC mode)
     "io_devices": [
         {"name": "Device 1", "state": False},
         {"name": "Device 2", "state": False},
@@ -92,9 +91,6 @@ FPS_OPTIONS = [5, 10, 15, 20, 30]
 ROTATION_OPTIONS = [0, 90, 180, 270]
 STREAM_MODE_OPTIONS = ["mjpeg"]  # "webrtc" prepended at runtime when aiortc is installed
 MJPEG_QUALITY = 15        # JPEG quality 1–95 (lower = smaller frames). 15 ≈ acceptable @ 320×240.
-H264_GOP = 30             # I-frame every 30 frames (~2 s @ 15 fps) — good for lossy WiFi recovery
-H264_BITRATE_MIN_KBPS = 100
-H264_BITRATE_MAX_KBPS = 2000
 
 # ---------------------------------------------------------------------------
 # WEBRTC (aiortc) — optional; app works fine without it (falls back to MJPEG)
@@ -119,72 +115,40 @@ if WEBRTC_AVAILABLE:
 
     class PiCameraTrack(VideoStreamTrack):
         """
-        Reads the hardware-encoded H.264 bitstream from `h264_output`, decodes it
-        with a persistent PyAV codec context, and yields VideoFrames to aiortc.
-        (aiortc still re-encodes to RTP H.264 internally, but at the capped bitrate.)
+        Grabs the latest MJPEG frame from the shared buffer, decodes it to YUV,
+        and hands it to aiortc which re-encodes as H.264 over RTP.
+        Using quality=15 MJPEG as source keeps per-frame decode overhead low on Pi 3B+
+        and the RTP sender cap keeps outbound bandwidth at ~500 kbps.
         """
-
-        def __init__(self):
-            super().__init__()
-            self._codec = _av.CodecContext.create("h264", "r")
-            self._frames: list = []
-            self._cond = threading.Condition()
-            self._stop = False
-            self._reader = threading.Thread(
-                target=self._read_loop, daemon=True, name="h264-decode"
-            )
-            self._reader.start()
-
-        def _read_loop(self):
-            while not self._stop:
-                try:
-                    chunk = h264_output.read_chunk(timeout=2.0)
-                    if not chunk:
-                        continue
-                    for packet in self._codec.parse(chunk):
-                        for frame in self._codec.decode(packet):
-                            with self._cond:
-                                self._frames.append(frame)
-                                # Drop stale frames so we don't drift behind
-                                if len(self._frames) > 4:
-                                    self._frames = self._frames[-2:]
-                                self._cond.notify_all()
-                except Exception as exc:
-                    logging.debug(f"H.264 decode loop: {exc}")
-
-        def _next_frame(self):
-            with self._cond:
-                if not self._frames:
-                    self._cond.wait(timeout=2.0)
-                if self._frames:
-                    return self._frames.pop(0)
-            return None
 
         async def recv(self):
             pts, time_base = await self.next_timestamp()
             loop = _asyncio.get_event_loop()
-            frame = await loop.run_in_executor(None, self._next_frame)
-            if frame is not None:
+            jpeg = await loop.run_in_executor(None, self._grab)
+            if jpeg:
                 try:
-                    out = frame.reformat(format="yuv420p")
-                    out.pts = pts
-                    out.time_base = time_base
-                    return out
+                    import io as _io
+                    container = _av.open(_io.BytesIO(bytes(jpeg)), format="mjpeg")
+                    try:
+                        for raw in container.decode(video=0):
+                            frame = raw.reformat(format="yuv420p")
+                            frame.pts = pts
+                            frame.time_base = time_base
+                            return frame
+                    finally:
+                        container.close()
                 except Exception as exc:
-                    logging.debug(f"WebRTC reformat: {exc}")
-            # Blank fallback (decoder still warming up / stream paused)
+                    logging.debug(f"WebRTC frame decode: {exc}")
             w, h = tuple(settings["resolution"])
-            blank = _av.VideoFrame(width=w, height=h, format="yuv420p")
-            blank.pts = pts
-            blank.time_base = time_base
-            return blank
+            frame = _av.VideoFrame(width=w, height=h, format="yuv420p")
+            frame.pts = pts
+            frame.time_base = time_base
+            return frame
 
-        def stop(self):
-            self._stop = True
-            try:
-                super().stop()
-            except Exception:
-                pass
+        def _grab(self):
+            with output.condition:
+                output.condition.wait(timeout=4.0)
+            return output.frame
 
     async def _do_offer(sdp: str, kind: str) -> dict:
         pc = RTCPeerConnection()
@@ -215,12 +179,11 @@ if WEBRTC_AVAILABLE:
         answer = await pc.createAnswer()
         await pc.setLocalDescription(answer)
 
-        # Cap RTP bandwidth to match the hardware encoder's source bitrate.
+        # Cap RTP outbound to 500 kbps — matches MJPEG source at quality=15.
         try:
             params = sender.getParameters()
             if params.encodings:
-                cap_bps = int(settings.get("h264_bitrate_kbps", 500)) * 1000
-                params.encodings[0].maxBitrate = cap_bps
+                params.encodings[0].maxBitrate = 500_000  # bits/sec
                 await sender.setParameters(params)
         except Exception as exc:
             logging.debug(f"Bitrate cap failed: {exc}")
@@ -300,57 +263,68 @@ class StreamingOutput(io.BufferedIOBase):
         return round((total_bytes * 8) / (elapsed * 1000), 1)
 
 
-class H264StreamBuffer(io.BufferedIOBase):
+class NetworkMonitor:
     """
-    Thread-safe append-only buffer for the hardware H.264 Annex-B bitstream.
-    Unlike StreamingOutput (which holds one whole JPEG), the H.264 encoder emits
-    arbitrary-sized NAL chunks that must be concatenated and parsed.
+    Measures TX/RX bitrate from the Pi's active network interface by polling
+    /sys/class/net/{iface}/statistics/ every 2 seconds.
     """
+
+    _IFACES = ["wlan0", "wlan1", "eth0"]
 
     def __init__(self):
-        self._cond = threading.Condition()
-        self._buf = bytearray()
-        self.last_frame_time = 0
-        self._bw_window = []
+        self._prev_tx = 0
+        self._prev_rx = 0
+        self._prev_time = 0.0
+        self._tx_kbps = 0.0
+        self._rx_kbps = 0.0
+        self._iface = self._detect_iface()
+        threading.Thread(target=self._loop, daemon=True, name="net-monitor").start()
 
-    def write(self, buf):
-        with self._cond:
-            self._buf.extend(buf)
+    def _detect_iface(self):
+        for iface in self._IFACES:
+            if os.path.exists(f"/sys/class/net/{iface}"):
+                return iface
+        return None
+
+    def _read_bytes(self):
+        if not self._iface:
+            return None, None
+        try:
+            with open(f"/sys/class/net/{self._iface}/statistics/tx_bytes") as f:
+                tx = int(f.read().strip())
+            with open(f"/sys/class/net/{self._iface}/statistics/rx_bytes") as f:
+                rx = int(f.read().strip())
+            return tx, rx
+        except Exception:
+            return None, None
+
+    def _loop(self):
+        while True:
+            time.sleep(2.0)
+            tx, rx = self._read_bytes()
+            if tx is None:
+                continue
             now = time.time()
-            self.last_frame_time = now
-            self._bw_window.append((now, len(buf)))
-            cutoff = now - 5.0
-            self._bw_window = [(t, b) for t, b in self._bw_window if t > cutoff]
-            self._cond.notify_all()
+            if self._prev_time > 0:
+                dt = now - self._prev_time
+                if dt > 0:
+                    self._tx_kbps = round((tx - self._prev_tx) * 8 / (dt * 1000), 1)
+                    self._rx_kbps = round((rx - self._prev_rx) * 8 / (dt * 1000), 1)
+            self._prev_tx = tx
+            self._prev_rx = rx
+            self._prev_time = now
 
-    def read_chunk(self, timeout=2.0):
-        """Block until bytes are available, then return and clear them."""
-        with self._cond:
-            if not self._buf:
-                self._cond.wait(timeout=timeout)
-            data = bytes(self._buf)
-            self._buf.clear()
-            return data
-
-    def reset(self):
-        with self._cond:
-            self._buf.clear()
-
-    def actual_bitrate_kbps(self):
-        now = time.time()
-        window = [(t, b) for t, b in self._bw_window if t > now - 5.0]
-        if len(window) < 2:
-            return 0.0
-        total_bytes = sum(b for _, b in window)
-        elapsed = window[-1][0] - window[0][0]
-        if elapsed <= 0:
-            return 0.0
-        return round((total_bytes * 8) / (elapsed * 1000), 1)
+    def stats(self):
+        return {
+            "iface": self._iface,
+            "tx_kbps": max(0.0, self._tx_kbps),
+            "rx_kbps": max(0.0, self._rx_kbps),
+        }
 
 
 # --- Camera setup ---
-output = StreamingOutput()        # MJPEG buffer (HTTP /video_feed)
-h264_output = H264StreamBuffer()  # H.264 bitstream buffer (WebRTC source)
+output = StreamingOutput()   # MJPEG buffer — used by /video_feed and WebRTC source
+net_monitor = NetworkMonitor()
 
 # Try to initialise the camera; continue without it if not present.
 _cameras = Picamera2.global_camera_info()
@@ -376,9 +350,8 @@ def _make_transform(degrees):
 
 def configure_camera():
     """
-    Apply current settings to the camera. Picks the encoder based on stream_mode:
-      - "mjpeg"  → software-friendly MJPEG into `output` (used by /video_feed)
-      - "webrtc" → hardware H.264 into `h264_output` (used by PiCameraTrack)
+    Apply current settings to the camera. Always uses MJPEGEncoder — the MJPEG
+    buffer feeds both /video_feed (direct) and WebRTC (decoded to YUV by aiortc).
     No-op if no camera is present.
     """
     if not CAMERA_AVAILABLE:
@@ -389,7 +362,6 @@ def configure_camera():
         pass
 
     transform = _make_transform(settings.get("camera_rotation", 0))
-    mode = settings.get("stream_mode", "mjpeg")
 
     picam2.configure(
         picam2.create_video_configuration(
@@ -399,29 +371,13 @@ def configure_camera():
         )
     )
 
-    if mode == "webrtc" and WEBRTC_AVAILABLE:
-        # Hardware H.264 (VideoCore IV block) — capped bitrate, fixed GOP.
-        bitrate_kbps = int(settings.get("h264_bitrate_kbps", 500))
-        bitrate_kbps = max(H264_BITRATE_MIN_KBPS, min(H264_BITRATE_MAX_KBPS, bitrate_kbps))
-        h264_output.reset()
-        encoder = H264Encoder(
-            bitrate=bitrate_kbps * 1000,
-            iperiod=H264_GOP,   # I-frame interval (GOP size)
-            repeat=True,        # repeat SPS/PPS before each IDR — required for streaming
-        )
-        picam2.start_recording(encoder, FileOutput(h264_output))
-        logging.info(
-            f"Camera: hardware H.264 @ {bitrate_kbps} kbps, GOP={H264_GOP}, "
-            f"{settings['resolution']} @ {settings['fps']} fps"
-        )
-    else:
-        encoder = MJPEGEncoder(bitrate=None)
-        encoder.quality = MJPEG_QUALITY
-        picam2.start_recording(encoder, FileOutput(output))
-        logging.info(
-            f"Camera: MJPEG quality={MJPEG_QUALITY}, "
-            f"{settings['resolution']} @ {settings['fps']} fps"
-        )
+    encoder = MJPEGEncoder(bitrate=None)
+    encoder.quality = MJPEG_QUALITY
+    picam2.start_recording(encoder, FileOutput(output))
+    logging.info(
+        f"Camera: MJPEG quality={MJPEG_QUALITY}, "
+        f"{settings['resolution']} @ {settings['fps']} fps"
+    )
 
 configure_camera()
 
@@ -434,12 +390,8 @@ def camera_watchdog():
         time.sleep(WATCHDOG_TIMEOUT)
         if not CAMERA_AVAILABLE:
             continue
-        # Watch whichever buffer the active encoder is feeding.
-        active_buf = (h264_output
-                      if settings.get("stream_mode") == "webrtc" and WEBRTC_AVAILABLE
-                      else output)
-        elapsed = time.time() - active_buf.last_frame_time
-        if active_buf.last_frame_time > 0 and elapsed > WATCHDOG_TIMEOUT:
+        elapsed = time.time() - output.last_frame_time
+        if output.last_frame_time > 0 and elapsed > WATCHDOG_TIMEOUT:
             logging.warning(f"No frame for {elapsed:.1f}s — restarting camera...")
             try:
                 configure_camera()
@@ -581,21 +533,22 @@ def api_status():
     )
     mb_per_hour = estimate_mb_per_hour(bitrate_kbps)
     mode = settings.get("stream_mode", "mjpeg")
-    active_buf = h264_output if mode == "webrtc" and WEBRTC_AVAILABLE else output
-    elapsed = (time.time() - active_buf.last_frame_time
-               if active_buf.last_frame_time > 0 else None)
+    elapsed = time.time() - output.last_frame_time if output.last_frame_time > 0 else None
+    net = net_monitor.stats()
     return jsonify({
         "resolution": settings["resolution"],
         "fps": settings["fps"],
         "stream_mode": mode,
         "max_motor_speed": settings.get("max_motor_speed", 7),
         "camera_rotation": settings.get("camera_rotation", 0),
-        "h264_bitrate_kbps": settings.get("h264_bitrate_kbps", 500),
         "bitrate_kbps": round(bitrate_kbps, 1),
         "mb_per_hour": round(mb_per_hour, 2),
         "camera_ok": elapsed is not None and elapsed < WATCHDOG_TIMEOUT,
         "last_frame_age_s": round(elapsed, 1) if elapsed is not None else None,
-        "actual_bitrate_kbps": active_buf.actual_bitrate_kbps(),
+        "actual_bitrate_kbps": output.actual_bitrate_kbps(),
+        "net_iface": net["iface"],
+        "net_tx_kbps": net["tx_kbps"],
+        "net_rx_kbps": net["rx_kbps"],
         "battery_percent": get_battery_percent(),
         "io_devices": [
             {"name": d["name"], "state": io_states[i]}
@@ -616,7 +569,6 @@ def api_update_settings():
     new_stream_mode  = data.get("stream_mode")
     new_motor_speed  = data.get("max_motor_speed")
     new_rotation     = data.get("camera_rotation")
-    new_h264_kbps    = data.get("h264_bitrate_kbps")
     new_io_devices   = data.get("io_devices")
 
     if new_resolution and tuple(new_resolution) in RESOLUTION_OPTIONS:
@@ -633,14 +585,6 @@ def api_update_settings():
 
     if new_rotation is not None and int(new_rotation) in ROTATION_OPTIONS:
         settings["camera_rotation"] = int(new_rotation)
-
-    if new_h264_kbps is not None:
-        try:
-            kbps = int(new_h264_kbps)
-            if H264_BITRATE_MIN_KBPS <= kbps <= H264_BITRATE_MAX_KBPS:
-                settings["h264_bitrate_kbps"] = kbps
-        except (TypeError, ValueError):
-            pass
 
     if new_io_devices and isinstance(new_io_devices, list):
         merged = []
