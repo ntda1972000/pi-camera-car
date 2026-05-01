@@ -30,6 +30,7 @@ DEFAULT_SETTINGS = {
     "resolution": [320, 240],
     "fps": 15,
     "stream_mode": "mjpeg",
+    "mjpeg_bitrate": 700_000,  # bits/sec
     "max_motor_speed": 7,     # 0–10 scale
     "camera_rotation": 0,     # degrees: 0, 90, 180, 270
     "io_devices": [
@@ -90,7 +91,8 @@ RESOLUTION_OPTIONS = [(160, 120), (320, 240), (480, 360), (640, 480)]
 FPS_OPTIONS = [5, 10, 15, 20, 30]
 ROTATION_OPTIONS = [0, 90, 180, 270]
 STREAM_MODE_OPTIONS = ["mjpeg"]  # "webrtc" prepended at runtime when aiortc is installed
-MJPEG_QUALITY = 15        # JPEG quality 1–95 (lower = smaller frames). 15 ≈ acceptable @ 320×240.
+MJPEG_BITRATE_OPTIONS = [300_000, 500_000, 700_000, 1_000_000, 1_500_000, 2_000_000]
+MJPEG_BITRATE = settings.get("mjpeg_bitrate", 700_000)  # loaded from settings
 
 # ---------------------------------------------------------------------------
 # WEBRTC (aiortc) — optional; app works fine without it (falls back to MJPEG)
@@ -371,11 +373,11 @@ def configure_camera():
         )
     )
 
-    encoder = MJPEGEncoder(bitrate=None)
-    encoder.quality = MJPEG_QUALITY
+    bitrate = settings.get("mjpeg_bitrate", MJPEG_BITRATE)
+    encoder = MJPEGEncoder(bitrate=bitrate)
     picam2.start_recording(encoder, FileOutput(output))
     logging.info(
-        f"Camera: MJPEG quality={MJPEG_QUALITY}, "
+        f"Camera: MJPEG bitrate={bitrate} bps ({bitrate//8000} kB/s), "
         f"{settings['resolution']} @ {settings['fps']} fps"
     )
 
@@ -425,20 +427,16 @@ def generate_frames():
 
 @app.route("/")
 def index():
-    bitrate_kbps = estimate_bitrate_kbps(
-        settings["resolution"][0],
-        settings["resolution"][1],
-        settings["fps"],
-        MJPEG_QUALITY
-    )
+    cur_bitrate = settings.get("mjpeg_bitrate", MJPEG_BITRATE)
+    bitrate_kbps = round(cur_bitrate / 1000, 1)
     mb_per_hour = estimate_mb_per_hour(bitrate_kbps)
     
     return render_template("index.html",
                            mode=settings.get("stream_mode", "mjpeg"),
                            resolution=settings["resolution"],
                            fps=settings["fps"],
-                           quality=MJPEG_QUALITY,
-                           bitrate_kbps=round(bitrate_kbps, 1),
+                           quality=cur_bitrate,
+                           bitrate_kbps=bitrate_kbps,
                            mb_per_hour=round(mb_per_hour, 2),
                            battery_percent=get_battery_percent())
 
@@ -475,18 +473,15 @@ def settings_page():
     if not session.get("authenticated"):
         return redirect(url_for("login"))
     
-    bitrate_kbps = estimate_bitrate_kbps(
-        settings["resolution"][0],
-        settings["resolution"][1],
-        settings["fps"],
-        MJPEG_QUALITY
-    )
+    cur_bitrate = settings.get("mjpeg_bitrate", MJPEG_BITRATE)
+    bitrate_kbps = round(cur_bitrate / 1000, 1)
     mb_per_hour = estimate_mb_per_hour(bitrate_kbps)
     
     resp = make_response(render_template("settings.html",
                            current_resolution=tuple(settings["resolution"]),
                            current_fps=settings["fps"],
                            current_stream_mode=settings.get("stream_mode", "mjpeg"),
+                           current_mjpeg_bitrate=cur_bitrate,
                            current_max_motor_speed=settings.get("max_motor_speed", 7),
                            current_rotation=settings.get("camera_rotation", 0),
                            io_devices=settings.get("io_devices", []),
@@ -494,9 +489,10 @@ def settings_page():
                            fps_options=FPS_OPTIONS,
                            rotation_options=ROTATION_OPTIONS,
                            stream_mode_options=STREAM_MODE_OPTIONS,
-                           bitrate_kbps=round(bitrate_kbps, 1),
+                           mjpeg_bitrate_options=MJPEG_BITRATE_OPTIONS,
+                           bitrate_kbps=bitrate_kbps,
                            mb_per_hour=round(mb_per_hour, 2),
-                           quality=MJPEG_QUALITY))
+                           quality=cur_bitrate))
     # Prevent browser BFCache from serving a stale snapshot on back-button navigation
     resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
     resp.headers["Pragma"] = "no-cache"
@@ -513,7 +509,7 @@ def api_estimate():
     if not all([width, height, fps]):
         return jsonify({"error": "Missing width, height, or fps"}), 400
     
-    bitrate_kbps = estimate_bitrate_kbps(width, height, fps, MJPEG_QUALITY)
+    bitrate_kbps = estimate_bitrate_kbps(width, height, fps, settings.get("mjpeg_bitrate", MJPEG_BITRATE) / 1000)
     mb_per_hour = estimate_mb_per_hour(bitrate_kbps)
     
     return jsonify({
@@ -525,12 +521,7 @@ def api_estimate():
 @app.route("/api/status")
 def api_status():
     """Return current camera settings and data estimates."""
-    bitrate_kbps = estimate_bitrate_kbps(
-        settings["resolution"][0],
-        settings["resolution"][1],
-        settings["fps"],
-        MJPEG_QUALITY
-    )
+    bitrate_kbps = round(settings.get("mjpeg_bitrate", MJPEG_BITRATE) / 1000, 1)
     mb_per_hour = estimate_mb_per_hour(bitrate_kbps)
     mode = settings.get("stream_mode", "mjpeg")
     elapsed = time.time() - output.last_frame_time if output.last_frame_time > 0 else None
@@ -539,6 +530,7 @@ def api_status():
         "resolution": settings["resolution"],
         "fps": settings["fps"],
         "stream_mode": mode,
+        "mjpeg_bitrate": settings.get("mjpeg_bitrate", MJPEG_BITRATE),
         "max_motor_speed": settings.get("max_motor_speed", 7),
         "camera_rotation": settings.get("camera_rotation", 0),
         "bitrate_kbps": round(bitrate_kbps, 1),
@@ -586,6 +578,12 @@ def api_update_settings():
     if new_rotation is not None and int(new_rotation) in ROTATION_OPTIONS:
         settings["camera_rotation"] = int(new_rotation)
 
+    new_mjpeg_bitrate = data.get("mjpeg_bitrate")
+    if new_mjpeg_bitrate is not None and int(new_mjpeg_bitrate) in MJPEG_BITRATE_OPTIONS:
+        global MJPEG_BITRATE
+        settings["mjpeg_bitrate"] = int(new_mjpeg_bitrate)
+        MJPEG_BITRATE = int(new_mjpeg_bitrate)
+
     if new_io_devices and isinstance(new_io_devices, list):
         merged = []
         for i, dev in enumerate(new_io_devices[:4]):
@@ -600,12 +598,7 @@ def api_update_settings():
     configure_camera()
     save_settings()
 
-    bitrate_kbps = estimate_bitrate_kbps(
-        settings["resolution"][0],
-        settings["resolution"][1],
-        settings["fps"],
-        MJPEG_QUALITY
-    )
+    bitrate_kbps = round(settings.get("mjpeg_bitrate", MJPEG_BITRATE) / 1000, 1)
     mb_per_hour = estimate_mb_per_hour(bitrate_kbps)
 
     return jsonify({

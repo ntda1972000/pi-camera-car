@@ -471,9 +471,9 @@
               const dt = now - _rtcPrevTime;
               const db = r.bytesSent - _rtcPrevBytes;
               if (dt > 0 && db >= 0) {
-                const kbps = Math.round((db * 8) / (dt * 1000));
+                const kBps = Math.round((db) / (dt * 1000));
                 const el = document.getElementById("status-kbps");
-                if (el) el.textContent = kbps + " kbps";
+                if (el) el.textContent = kBps + " kB/s";
               }
             }
             _rtcPrevBytes = r.bytesSent;
@@ -538,9 +538,9 @@
           // Show server-side actual bitrate; WebRTC getStats() will overwrite if active
           const kbpsEl = document.getElementById("status-kbps");
           if (!usingWebRTC && data.actual_bitrate_kbps !== undefined) {
-            kbpsEl.textContent = data.actual_bitrate_kbps + " kbps";
+            kbpsEl.textContent = Math.round(data.actual_bitrate_kbps / 8) + " kB/s";
           } else if (!usingWebRTC) {
-            kbpsEl.textContent = data.bitrate_kbps + " kbps*";
+            kbpsEl.textContent = Math.round(data.bitrate_kbps / 8) + " kB/s*";
           }
           document.getElementById("speed-label").textContent =
             data.max_motor_speed !== undefined ? data.max_motor_speed : "—";
@@ -561,8 +561,8 @@
           // Network TX / RX from Pi NIC counters
           const txEl = document.getElementById("status-tx");
           const rxEl = document.getElementById("status-rx");
-          if (txEl) txEl.textContent = data.net_tx_kbps !== undefined ? data.net_tx_kbps + "k" : "N/A";
-          if (rxEl) rxEl.textContent = data.net_rx_kbps !== undefined ? data.net_rx_kbps + "k" : "N/A";
+          if (txEl) txEl.textContent = data.net_tx_kbps !== undefined ? Math.round(data.net_tx_kbps / 8) + " kB/s" : "N/A";
+          if (rxEl) rxEl.textContent = data.net_rx_kbps !== undefined ? Math.round(data.net_rx_kbps / 8) + " kB/s" : "N/A";
           // I/O buttons
           if (data.io_devices) updateIOButtons(data.io_devices);
 

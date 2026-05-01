@@ -171,7 +171,19 @@
           {% for mode in stream_mode_options %}
             <option value="{{ mode }}"
                     {% if mode == current_stream_mode %}selected{% endif %}>
-              {% if mode == "webrtc" %}WebRTC (H.264 — tiết kiệm 4G){% else %}MJPEG{% endif %}
+              {% if mode == "webrtc" %}WebRTC (H.264){% else %}MJPEG{% endif %}
+            </option>
+          {% endfor %}
+        </select>
+      </div>
+
+      <div class="setting-group" id="mjpeg-bitrate-group">
+        <label for="mjpeg-bitrate">MJPEG Bitrate</label>
+        <select id="mjpeg-bitrate">
+          {% for br in mjpeg_bitrate_options %}
+            <option value="{{ br }}"
+                    {% if br == current_mjpeg_bitrate %}selected{% endif %}>
+              {{ (br // 1000) }} kbps (~{{ br // 8000 }} kB/s)
             </option>
           {% endfor %}
         </select>
@@ -304,39 +316,45 @@
   </style>
 
   <script>
-    const resSelect   = document.getElementById("resolution");
-    const fpsSelect   = document.getElementById("fps");
-    const modeSelect  = document.getElementById("stream-mode");
-    const bitrateEl   = document.getElementById("bitrate");
-    const mbPerHourEl = document.getElementById("mb-per-hour");
-    const playtimeEl  = document.getElementById("playtime");
-    const statusEl    = document.getElementById("status");
-    const saveBtn     = document.getElementById("save-btn");
+    const resSelect    = document.getElementById("resolution");
+    const fpsSelect    = document.getElementById("fps");
+    const modeSelect   = document.getElementById("stream-mode");
+    const bitrateSelect = document.getElementById("mjpeg-bitrate");
+    const bitrateEl    = document.getElementById("bitrate");
+    const mbPerHourEl  = document.getElementById("mb-per-hour");
+    const playtimeEl   = document.getElementById("playtime");
+    const statusEl     = document.getElementById("status");
+    const saveBtn      = document.getElementById("save-btn");
+
+    function toggleBitrateGroup() {
+      document.getElementById("mjpeg-bitrate-group").style.display =
+        modeSelect.value === "mjpeg" ? "" : "none";
+    }
+    modeSelect.addEventListener("change", toggleBitrateGroup);
+    toggleBitrateGroup();
 
     function updateEstimate() {
-      const [width, height] = resSelect.value.split(",").map(Number);
-      const fps = parseInt(fpsSelect.value);
-      fetch(`/api/estimate?width=${width}&height=${height}&fps=${fps}`)
-        .then(r => r.json())
-        .then(data => {
-          bitrateEl.textContent   = data.bitrate_kbps + " kbps";
-          mbPerHourEl.textContent = data.mb_per_hour + " MB";
-          playtimeEl.textContent  = "~" + (2000 / data.mb_per_hour).toFixed(1) + " hours";
-        });
+      const br_kbps = parseInt(bitrateSelect.value) / 1000;
+      const mb_per_hour = (br_kbps * 3600) / (8 * 1024);
+      bitrateEl.textContent   = Math.round(br_kbps / 8) + " kB/s";
+      mbPerHourEl.textContent = mb_per_hour.toFixed(1) + " MB";
+      playtimeEl.textContent  = "~" + (2000 / mb_per_hour).toFixed(1) + " hours";
     }
 
     function saveSettings() {
       const [width, height] = resSelect.value.split(",").map(Number);
-      const fps      = parseInt(fpsSelect.value);
-      const mode     = modeSelect.value;
-      const speed    = parseInt(document.getElementById("max-motor-speed").value);
-      const rotation = parseInt(document.getElementById("camera-rotation").value);
+      const fps         = parseInt(fpsSelect.value);
+      const mode        = modeSelect.value;
+      const speed       = parseInt(document.getElementById("max-motor-speed").value);
+      const rotation    = parseInt(document.getElementById("camera-rotation").value);
+      const mjpeg_bitrate = parseInt(bitrateSelect.value);
       saveBtn.disabled = true;
       fetch("/api/update_settings", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ resolution: [width, height], fps, stream_mode: mode,
-                               max_motor_speed: speed, camera_rotation: rotation })
+                               max_motor_speed: speed, camera_rotation: rotation,
+                               mjpeg_bitrate })
       })
         .then(r => r.json())
         .then(() => {
@@ -394,6 +412,7 @@
 
     resSelect.addEventListener("change", updateEstimate);
     fpsSelect.addEventListener("change", updateEstimate);
+    bitrateSelect.addEventListener("change", updateEstimate);
   </script>
 </body>
 </html>

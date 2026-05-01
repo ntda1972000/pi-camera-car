@@ -1,12 +1,12 @@
 {
   "resolution": [
-    320,
-    240
+    160,
+    120
   ],
-  "fps": 15,
+  "fps": 30,
   "stream_mode": "mjpeg",
-  "max_motor_speed": 9,
-  "camera_rotation": 0,
+  "max_motor_speed": 10,
+  "camera_rotation": 180,
   "io_devices": [
     {
       "name": "Light",
@@ -24,5 +24,7 @@
       "name": "Device 4",
       "state": false
     }
-  ]
+  ],
+  "h264_bitrate_kbps": 500,
+  "mjpeg_bitrate": 700000
 }
