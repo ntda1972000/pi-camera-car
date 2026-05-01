@@ -8,35 +8,29 @@
     * { box-sizing: border-box; margin: 0; padding: 0; }
 
     html, body {
-      height: 100%;
-      overflow: hidden;
       background: #212121;
       color: #ececec;
       font-family: ui-sans-serif, system-ui, -apple-system, sans-serif;
     }
 
-    /* ──────────────────────────────────────────────────────────────────────
-       MOBILE HEIGHT TUNING
-       Adjust --bottom-offset to push content away from the nav bar.
-       Increase the px value if content is still cut off (e.g. 72px, 80px).
-    ────────────────────────────────────────────────────────────────────── */
-    :root { --bottom-offset: 0px; }
-    @media (max-width: 768px) { :root { --bottom-offset: 10px; } }
+    /* ── Desktop: full-viewport no-scroll layout ── */
+    @media (min-width: 769px) {
+      html, body { height: 100%; overflow: hidden; }
+    }
 
-    /* ── Full-viewport shell ── */
+    /* ── Full-viewport shell (desktop only locks height) ── */
     .shell {
       display: flex;
       flex-direction: column;
-      height: 100vh;
-      height: 100dvh;
-      max-height: calc(100dvh - var(--bottom-offset));
-      /* Use max() so safe-area never drops below 8px even on phones with no notch */
-      padding-top: 8px;
-      padding-right: max(8px, env(safe-area-inset-right));
-      padding-bottom: max(12px, env(safe-area-inset-bottom));
-      padding-left: max(8px, env(safe-area-inset-left));
+      padding: 8px max(8px, env(safe-area-inset-right)) max(12px, env(safe-area-inset-bottom)) max(8px, env(safe-area-inset-left));
       gap: 6px;
-      overflow: hidden;
+    }
+    @media (min-width: 769px) {
+      .shell {
+        height: 100vh;
+        height: 100dvh;
+        overflow: hidden;
+      }
     }
 
     /* ── Top bar ── */
@@ -70,21 +64,22 @@
     }
     .settings-btn:hover { background: #0d8c6c; transform: rotate(90deg); }
 
-    /* ── Main area (fills remaining height) ── */
+    /* ── Main area ── */
     .main {
       flex: 1;
-      min-height: 0;           /* allow shrink below content size */
+      min-height: 0;
       display: grid;
       gap: 8px;
     }
 
-    /* PC: side-by-side */
+    /* Desktop: side-by-side, fills remaining viewport */
     @media (min-width: 769px) {
       .main { grid-template-columns: 1fr 1fr; }
     }
 
+    /* Mobile: single column, natural height (page scrolls) */
     @media (max-width: 768px) {
-      .main { grid-template-columns: 1fr; grid-template-rows: 1fr 1fr; }
+      .main { grid-template-columns: 1fr; }
       h1 { font-size: 0.9rem; }
       .top-bar { height: 36px; }
       .settings-btn { width: 34px; height: 34px; font-size: 1rem; }
@@ -100,7 +95,15 @@
       border: 1px solid #3f3f3f;
       border-radius: 10px;
       overflow: hidden;
-      min-height: 0;
+      min-height: 0;   /* desktop: allows shrink inside grid */
+    }
+    /* Mobile: stream is a fixed-height block so it's always visible */
+    @media (max-width: 768px) {
+      .stream-panel {
+        height: 52vw;       /* ~16:9 for a typical phone width */
+        min-height: 180px;
+        max-height: 45vh;
+      }
     }
     .stream-panel img,
     .stream-panel video {
@@ -173,29 +176,37 @@
       text-overflow: ellipsis;
     }
 
-    /* ── Control card (fills rest of side panel) ── */
+    /* ── Control card ── */
     .control-card {
       background: #2f2f2f;
       border: 1px solid #3f3f3f;
       border-radius: 10px;
       padding: 10px 14px;
-      flex: 1;
-      min-height: 0;
       display: flex;
       flex-direction: column;
-      overflow-y: auto;
     }
-    .control-card .card-title { margin-bottom: 8px; }
+    /* Desktop: fills remaining side-panel height */
+    @media (min-width: 769px) {
+      .control-card { flex: 1; min-height: 0; overflow: hidden; }
+    }
+    .control-card .card-title { margin-bottom: 8px; flex-shrink: 0; }
 
     /* ── Joystick ── */
     .joystick-wrapper {
-      flex: 1;
-      min-height: 0;
       display: flex;
       flex-direction: column;
       align-items: center;
       justify-content: center;
       gap: 8px;
+      padding: 8px 0;
+    }
+    /* Desktop: fills remaining control-card height */
+    @media (min-width: 769px) {
+      .joystick-wrapper { flex: 1; min-height: 0; }
+    }
+    /* Mobile: guaranteed minimum so it's always visible */
+    @media (max-width: 768px) {
+      .joystick-wrapper { min-height: 240px; }
     }
     .dir-display {
       font-size: 0.75rem;
@@ -585,9 +596,15 @@
     let lastX = 0, lastY = 0;
 
     function sizeJoystick() {
-      const wrapper = track.parentElement;
-      const available = Math.min(wrapper.clientWidth, wrapper.clientHeight - 52);
-      const size = Math.max(100, Math.min(260, available));
+      let size;
+      if (window.innerWidth <= 768) {
+        // Mobile: fixed size based on screen width so it's always fully visible
+        size = Math.max(160, Math.min(220, window.innerWidth - 80));
+      } else {
+        const wrapper = track.parentElement;
+        const available = Math.min(wrapper.clientWidth, wrapper.clientHeight - 52);
+        size = Math.max(100, Math.min(260, available));
+      }
       track.style.width  = size + "px";
       track.style.height = size + "px";
       trackR  = size / 2;
